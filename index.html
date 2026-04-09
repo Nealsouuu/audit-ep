@@ -1237,65 +1237,57 @@ function applyMasse() {
 
 updateOfflineBanner();
 
-// ── GOOGLE SHEETS CONFIG ──
-const SHEET_ID = '1yt6egmd8RnEhVRb2B-wT0FkChNgVceLp';
-const API_KEY = 'AIzaSyAz3XjP3fsDjy0mhrAC7bailiDsxWWq3yU';
-const SHEET_PL = 'Points Lumineux';
-const SHEET_ARM = 'Armoires';
-const BASE_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
-
-// Colonnes Points Lumineux dans le Sheet (ordre exact)
-const PL_COLS = ['ID','Nbr supports','Types de support','État du support','Hauteur',
-  "Types d'attache",'Nbr Luminaires','Types de luminaire','État luminaires',
-  'Technologie','Puissance','Photo du Luminaire','Photo du mât','Photo du classe 2',
-  'Longitude','Latitude','Coordonnees_GPS','Dans le Panier','Chantier','Technicien','Date'];
+// ── GOOGLE APPS SCRIPT CONFIG ──
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzI5xYwtoeIR7R4eEmCgBUxNP8DF1dE3yNhBlHloQBWaTgg-WHVgsZqanoAzOqPuc25/exec';
 
 let syncQueue = [];
 let isSyncing = false;
 
-// ── LIRE les données depuis Sheets au démarrage ──
+// ── LIRE les données depuis Apps Script ──
 async function loadFromSheets() {
   if (!navigator.onLine) { loadLocal(); return; }
   try {
     showToast('Chargement des données...');
-    const url = `${BASE_URL}/${SHEET_ID}/values/${SHEET_PL}?key=${API_KEY}`;
+    const url = SCRIPT_URL + '?sheet=Points%20Lumineux&chantier=' + encodeURIComponent(state.chantier);
     const res = await fetch(url);
     const data = await res.json();
-    if (!data.values || data.values.length < 2) { loadLocal(); return; }
-    const rows = data.values.slice(1); // skip header
-    state.points = rows
-      .filter(r => r[18] === state.chantier || !r[18]) // filtre chantier
-      .map(r => ({
-        id: r[0] || '',
-        nbrSupports: r[1] || '',
-        typeSupport: r[2] || '',
-        etatSupport: r[3] || '',
-        hauteur: r[4] || '',
-        typeAttache: r[5] || '',
-        nbrLuminaires: r[6] || '',
-        typeLuminaire: r[7] || '',
-        etatLuminaire: r[8] || '',
-        technologie: r[9] || '',
-        puissance: r[10] || '',
-        lng: parseFloat(r[14]) || null,
-        lat: parseFloat(r[15]) || null,
-        dansPanier: r[17] === 'TRUE' || r[17] === true,
-        chantier: r[18] || '',
-        technicien: r[19] || '',
-        date: r[20] || '',
-        photos: {}
-      }));
+    if (data.error) throw new Error(data.error);
+    if (!data.rows || !data.rows.length) {
+      showToast('Aucun point sur ce chantier', '');
+      loadLocal();
+      return;
+    }
+    state.points = data.rows.map(r => ({
+      id: String(r['ID'] || ''),
+      nbrSupports: r['Nbr supports'] || '',
+      typeSupport: r['Types de support'] || '',
+      etatSupport: r['État du support'] || '',
+      hauteur: r['Hauteur'] || '',
+      typeAttache: r["Types d'attache"] || '',
+      nbrLuminaires: r['Nbr Luminaires'] || '',
+      typeLuminaire: r['Types de luminaire'] || '',
+      etatLuminaire: r['État luminaires'] || '',
+      technologie: r['Technologie'] || '',
+      puissance: r['Puissance'] || '',
+      lng: parseFloat(r['Longitude']) || null,
+      lat: parseFloat(r['Latitude']) || null,
+      dansPanier: r['Dans le Panier'] === 'TRUE' || r['Dans le Panier'] === true,
+      chantier: r['Chantier'] || '',
+      technicien: r['Technicien'] || '',
+      date: r['Date'] || '',
+      photos: {}
+    }));
     saveLocal();
     refreshMapMarkers();
     showToast(state.points.length + ' points chargés ✓', 'success');
   } catch(e) {
-    console.error('Sheets load error:', e);
+    console.error('Load error:', e);
     loadLocal();
-    showToast('Chargement local (hors-ligne)', '');
+    showToast('Mode hors-ligne', '');
   }
 }
 
-// ── ÉCRIRE un point dans Sheets ──
+// ── ÉCRIRE un point via Apps Script ──
 async function syncPointToSheets(pt) {
   if (!navigator.onLine) {
     syncQueue.push(pt);
@@ -1303,47 +1295,44 @@ async function syncPointToSheets(pt) {
     return;
   }
   try {
-    // Chercher si la ligne existe déjà
-    const searchUrl = `${BASE_URL}/${SHEET_ID}/values/${SHEET_PL}!A:A?key=${API_KEY}`;
-    const searchRes = await fetch(searchUrl);
-    const searchData = await searchRes.json();
-    const rows = searchData.values || [];
-    let rowIndex = rows.findIndex(r => r[0] === pt.id);
-    
     const coordsGPS = pt.lat && pt.lng ? pt.lat.toFixed(6) + ', ' + pt.lng.toFixed(6) : '';
-    const rowData = [
-      pt.id, pt.nbrSupports, pt.typeSupport, pt.etatSupport, pt.hauteur,
-      pt.typeAttache, pt.nbrLuminaires, pt.typeLuminaire, pt.etatLuminaire,
-      pt.technologie, pt.puissance, '', '', '',
-      pt.lng || '', pt.lat || '', coordsGPS,
-      pt.dansPanier ? 'TRUE' : 'FALSE',
-      pt.chantier, pt.technicien, pt.date
-    ];
-
-    let writeUrl, method, body;
-    if (rowIndex > 0) {
-      // UPDATE ligne existante
-      const sheetRow = rowIndex + 1;
-      writeUrl = `${BASE_URL}/${SHEET_ID}/values/${SHEET_PL}!A${sheetRow}:U${sheetRow}?valueInputOption=RAW&key=${API_KEY}`;
-      method = 'PUT';
-      body = { range: `${SHEET_PL}!A${sheetRow}:U${sheetRow}`, values: [rowData] };
-    } else {
-      // APPEND nouvelle ligne
-      writeUrl = `${BASE_URL}/${SHEET_ID}/values/${SHEET_PL}!A:U:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS&key=${API_KEY}`;
-      method = 'POST';
-      body = { range: `${SHEET_PL}!A:U`, values: [rowData] };
-    }
-
-    await fetch(writeUrl, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+    const payload = {
+      action: 'upsert',
+      sheet: 'Points Lumineux',
+      id: pt.id,
+      data: {
+        'ID': pt.id,
+        'Nbr supports': pt.nbrSupports,
+        'Types de support': pt.typeSupport,
+        'État du support': pt.etatSupport,
+        'Hauteur': pt.hauteur,
+        "Types d'attache": pt.typeAttache,
+        'Nbr Luminaires': pt.nbrLuminaires,
+        'Types de luminaire': pt.typeLuminaire,
+        'État luminaires': pt.etatLuminaire,
+        'Technologie': pt.technologie,
+        'Puissance': pt.puissance,
+        'Longitude': pt.lng || '',
+        'Latitude': pt.lat || '',
+        'Coordonnees_GPS': coordsGPS,
+        'Dans le Panier': pt.dansPanier ? 'TRUE' : 'FALSE',
+        'Chantier': pt.chantier,
+        'Technicien': pt.technicien,
+        'Date': pt.date
+      }
+    };
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(payload)
     });
-    showToast('Synchronisé ✓', 'success');
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+    showToast('Synchronisé dans Sheets ✓', 'success');
   } catch(e) {
     console.error('Sync error:', e);
     syncQueue.push(pt);
-    showToast('Erreur sync — sauvegardé local', '');
+    showToast('Sauvegardé local — sync au retour réseau', '');
   }
 }
 
