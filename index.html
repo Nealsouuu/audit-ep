@@ -523,6 +523,20 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 }
 .popup-btn-edit { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent); }
 .popup-btn-dup { background: var(--orange-dim); color: var(--orange); border: 1px solid var(--orange); }
+.popup-btn-del { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); flex: 0 0 auto; padding: 8px 10px; }
+.btn-save-top {
+  background: var(--accent);
+  color: #0f172a;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-display);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.btn-save-top:active { opacity: 0.8; }
 /* ─── v4 : robustesse terrain ─────────────────────────────── */
 .status-pill{position:fixed;top:calc(env(safe-area-inset-top) + 8px);right:10px;z-index:1200;display:flex;align-items:center;gap:6px;background:rgba(15,23,42,.82);backdrop-filter:blur(8px);border:1px solid var(--border2);border-radius:999px;padding:5px 10px;font-family:var(--font-mono);font-size:11px;color:var(--text2);cursor:pointer}
 .status-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--green);flex:none}
@@ -680,6 +694,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="map-ctrl-btn" id="lasso-btn" onclick="toggleLasso()" title="Lasso : entourer des points pour les sélectionner">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="9" cy="6.5" rx="6.5" ry="4.5" stroke-dasharray="3 2.5"/><path d="M6 10.5c0 2 .8 4 .8 4"/></svg>
     </div>
+    <div class="map-ctrl-btn" id="sat-btn" onclick="toggleSatellite()" title="Vue satellite">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="10" y="10" width="6" height="6" rx="1"/></svg>
+    </div>
   </div>
   <div class="map-fab" onclick="showForm(null)">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>
@@ -719,7 +736,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <div class="topbar-title" id="form-title">Nouveau point</div>
       <div class="topbar-sub" id="form-id-label"></div>
     </div>
-    <div style="width:70px"></div>
+    <button class="btn-save-top" onclick="savePoint()">Enregistrer</button>
   </div>
   <div class="form-scroll">
 
@@ -883,7 +900,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   </div>
   <div class="panier-scroll" id="panier-scroll"></div>
   <div class="panier-actions">
-    <button class="btn-masse" onclick="openModalMasse()">Modifier en masse</button>
+    <button class="btn-masse" onclick="openModalMasseChoice()">Modifier en masse</button>
     <button class="btn-vider" onclick="viderPanier()">Vider</button>
   </div>
 </div>
@@ -903,6 +920,27 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   <div class="nav-item" id="nav-panier" onclick="showScreen('panier')">
     <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/><path d="M16 10a4 4 0 01-8 0"/></svg>
     <span class="nav-label">Panier</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     MODAL CHOIX : 1 caractéristique vs toutes
+══════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-masse-choice" onclick="closeModalMasseChoice(event)">
+  <div class="modal">
+    <div class="modal-title">Modifier en masse</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:4px"><span id="masse-choice-count">0</span> point(s) sélectionné(s). Que voulez-vous modifier ?</div>
+    <div class="modal-actions">
+      <button class="btn-modal-action" onclick="closeModalMasseChoice();openModalMasse()" style="background:var(--accent-dim);color:var(--accent);border-color:var(--accent)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 8h10M8 3v10"/></svg>
+        Une seule caractéristique
+      </button>
+      <button class="btn-modal-action" onclick="closeModalMasseChoice();openModalMasseAll()" style="background:var(--orange-dim);color:var(--orange);border-color:var(--orange)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
+        Plusieurs caractéristiques (formulaire complet)
+      </button>
+    </div>
+    <button class="btn-cancel" onclick="closeModalMasseChoice()">Annuler</button>
   </div>
 </div>
 
@@ -944,6 +982,104 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════
+     MODAL MODIFICATION EN MASSE — TOUTES LES CARACTÉRISTIQUES
+══════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-masse-all" onclick="closeModalMasseAll(event)">
+  <div class="modal">
+    <div class="modal-title">Modifier plusieurs caractéristiques</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Laissez un champ vide pour ne pas le modifier. Seuls les champs remplis seront appliqués aux <span id="masse-all-count">0</span> points sélectionnés.</div>
+    <div style="max-height:50vh;overflow-y:auto;padding-right:2px">
+      <div class="form-row">
+        <div class="form-label">ID Armoire</div>
+        <input class="form-input" type="text" id="ma-id-armoire" placeholder="(ne pas modifier)" autocapitalize="characters">
+      </div>
+      <div class="form-row">
+        <div class="form-label">Nombre de supports</div>
+        <input class="form-input" type="number" id="ma-nbr-supports" placeholder="(ne pas modifier)" min="1" max="10">
+      </div>
+      <div class="form-row">
+        <div class="form-label">Type de support</div>
+        <select class="form-select" id="ma-type-support">
+          <option value="">-- Ne pas modifier --</option>
+          <option>Mât droit</option><option>Console</option><option>Potence</option>
+          <option>Candélabre</option><option>Encastré sol</option><option>Façade</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-label">État du support</div>
+        <select class="form-select" id="ma-etat-support">
+          <option value="">-- Ne pas modifier --</option>
+          <option>Bon</option><option>Moyen</option><option>Mauvais</option><option>À remplacer</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-label">Hauteur (m)</div>
+        <input class="form-input" type="number" id="ma-hauteur" placeholder="(ne pas modifier)" min="1" max="20">
+      </div>
+      <div class="form-row">
+        <div class="form-label">Type d'attache</div>
+        <select class="form-select" id="ma-type-attache">
+          <option value="">-- Ne pas modifier --</option>
+          <option>Bride</option><option>Crosse</option><option>Platine</option><option>Direct</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-label">Nombre de luminaires</div>
+        <input class="form-input" type="number" id="ma-nbr-luminaires" placeholder="(ne pas modifier)" min="1" max="4">
+      </div>
+      <div class="form-row">
+        <div class="form-label">Type de luminaire</div>
+        <select class="form-select" id="ma-type-luminaire">
+          <option value="">-- Ne pas modifier --</option>
+          <option>Lanterne</option><option>Projecteur</option><option>Hublot</option>
+          <option>Borne</option><option>Applique</option><option>Globe</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-label">État luminaire</div>
+        <select class="form-select" id="ma-etat-luminaire">
+          <option value="">-- Ne pas modifier --</option>
+          <option>Bon</option><option>Moyen</option><option>Mauvais</option><option>À remplacer</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-label">Technologie</div>
+        <select class="form-select" id="ma-technologie">
+          <option value="">-- Ne pas modifier --</option>
+          <option>LED</option><option>Sodium HP</option><option>Sodium BP</option>
+          <option>Iodures métalliques</option><option>Fluo compact</option><option>Inconnue</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-label">Puissance (W)</div>
+        <input class="form-input" type="number" id="ma-puissance" placeholder="(ne pas modifier)" min="1" max="1000">
+      </div>
+      <div class="form-row">
+        <div class="form-label">Classe de précision</div>
+        <select class="form-select" id="ma-classe-precision">
+          <option value="">-- Ne pas modifier --</option>
+          <option value="C">Classe C (smartphone/iPad)</option>
+          <option value="B">Classe B (≤ 1,5 m)</option>
+          <option value="A">Classe A (RTK, ≤ 40 cm)</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-label">Observations</div>
+        <textarea class="form-input" id="ma-observations" rows="2" placeholder="(ne pas modifier)"></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-action" onclick="applyMasseAll()" style="background:var(--orange-dim);color:var(--orange);border-color:var(--orange)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 8l4 4 8-8"/></svg>
+        Appliquer aux <span id="masse-all-count2">0</span> points du panier
+      </button>
+    </div>
+    <button class="btn-cancel" onclick="closeModalMasseAll()">Annuler</button>
+  </div>
+</div>
+
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 /* ════════ SOCLE ROBUSTESSE v4 ════════ */
@@ -957,13 +1093,16 @@ const DB = (() => {
   function open() {
     if (_db) return Promise.resolve(_db);
     return new Promise((resolve, reject) => {
-      const r = indexedDB.open('auditEP', 1);
+      const r = indexedDB.open('auditEP', 2);
       r.onupgradeneeded = (e) => {
         const db = e.target.result;
         if (!db.objectStoreNames.contains('points')) db.createObjectStore('points', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('photos')) db.createObjectStore('photos', { keyPath: 'key' });
         if (!db.objectStoreNames.contains('queue'))  db.createObjectStore('queue',  { keyPath: 'id' });
         if (!db.objectStoreNames.contains('meta'))   db.createObjectStore('meta',   { keyPath: 'k' });
+        // tombstones : IDs supprimés localement, pour ne pas les réimporter
+        // depuis le Sheet tant que la suppression serveur n'est pas confirmée.
+        if (!db.objectStoreNames.contains('tombstones')) db.createObjectStore('tombstones', { keyPath: 'id' });
       };
       r.onsuccess = () => { _db = r.result; resolve(_db); };
       r.onerror = () => reject(r.error);
@@ -1246,15 +1385,21 @@ function showScreen(name) {
 function goBack() { showScreen(state.previousScreen); }
 
 // ── MAP ──
-let map, markersLayer;
+let map, markersLayer, osmLayer, satLayer, satOn = false;
 function initMap() {
   if (map) return; // évite une double init
   map = L.map('map', { zoomControl: false, attributionControl: false }).setView([16.25, -61.55], 11);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     crossOrigin: true,
     attribution: '© OpenStreetMap'
   }).addTo(map);
+  // Imagerie satellite Esri World Imagery (gratuite, sans clé) — l'autre fond de carte alterné au bouton.
+  satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    crossOrigin: true,
+    attribution: 'Tiles © Esri'
+  });
   markersLayer = L.layerGroup().addTo(map);
   map.on('click', (e) => { if (poseMode && !lassoMode) addPointOnMap(e.latlng); });
   const cont = map.getContainer();
@@ -1264,6 +1409,16 @@ function initMap() {
   cont.addEventListener('pointercancel', lassoUp);
   loadFromSheets();
   centerOnMe();
+}
+
+// Bascule entre le fond de carte OpenStreetMap (plan) et l'imagerie satellite Esri.
+function toggleSatellite() {
+  if (!map) return;
+  satOn = !satOn;
+  if (satOn) { map.removeLayer(osmLayer); satLayer.addTo(map); }
+  else { map.removeLayer(satLayer); osmLayer.addTo(map); }
+  const btn = document.getElementById('sat-btn');
+  if (btn) btn.classList.toggle('active', satOn);
 }
 
 /* ════════ Mode Pose (poser un point en touchant la carte) ════════ */
@@ -1360,7 +1515,7 @@ function finishLasso() {
   });
   saveLocal();
   refreshMapMarkers();
-  if (count) { showToast(count + ' point' + (count > 1 ? 's' : '') + ' sélectionné' + (count > 1 ? 's' : ''), 'success'); openModalMasse(); }
+  if (count) { showToast(count + ' point' + (count > 1 ? 's' : '') + ' sélectionné' + (count > 1 ? 's' : ''), 'success'); openModalMasseChoice(); }
   else showToast('Aucun point dans la zone', '');
 }
 
@@ -1392,8 +1547,9 @@ function refreshMapMarkers() {
       <div class="popup-actions">
         <button class="popup-btn popup-btn-edit" onclick="editFromMap('${pt.id}')">Modifier</button>
         <button class="popup-btn popup-btn-dup" onclick="dupFromMap('${pt.id}')">Dupliquer</button>
+        <button class="popup-btn popup-btn-del" onclick="deleteFromMap('${pt.id}')" title="Supprimer">🗑</button>
       </div>
-    `, { maxWidth: 220 });
+    `, { maxWidth: 240 });
   });
   document.getElementById('map-count-badge').textContent = state.points.length + ' pts';
 }
@@ -1412,6 +1568,47 @@ function editFromMap(id) {
 function dupFromMap(id) {
   const pt = state.points.find(p => p.id === id);
   if (pt) { map.closePopup(); dupliquerPointData(pt); }
+}
+function deleteFromMap(id) {
+  const pt = state.points.find(p => p.id === id);
+  if (!pt) return;
+  if (!confirm('Supprimer définitivement le point ' + pt.id + ' ?\nCette action est irréversible sur cet appareil.')) return;
+  map.closePopup();
+  deletePointLocal(id);
+}
+// Supprime un point localement (et tente la suppression côté serveur).
+// NB : sans confirmation que le script Apps Script gère une action 'delete',
+// la ligne peut rester dans le Sheet — le tombstone local empêche au moins
+// sa réimportation automatique lors d'un prochain sync.
+async function deletePointLocal(id) {
+  const idx = state.points.findIndex(p => p.id === id);
+  if (idx === -1) return;
+  state.points.splice(idx, 1);
+  try { await DB.del('points', id); } catch (e) {}
+  try { await DB.del('queue', id); } catch (e) {}
+  try { await DB.put('tombstones', { id, ts: Date.now() }); } catch (e) {}
+  for (const t of PHOTO_TYPES) { try { await DB.del('photos', id + '__' + t); } catch (e) {} }
+  refreshMapMarkers();
+  renderList();
+  renderPanier();
+  updateStatus();
+  if (navigator.onLine) {
+    try {
+      const res = await fetch(SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'delete', sheet: 'Points Lumineux', id })
+      });
+      const result = await res.json().catch(() => ({}));
+      if (result && result.error) throw new Error(result.error);
+      showToast('Point supprimé ✓', 'success');
+    } catch (e) {
+      console.warn('Suppression serveur (à vérifier côté script) :', e);
+      showToast('Supprimé localement — vérifier le Sheet', '');
+    }
+  } else {
+    showToast('Supprimé localement — sera tenté au retour réseau', '');
+  }
 }
 
 // ── FORM ──
@@ -1747,6 +1944,17 @@ document.getElementById('masse-field').addEventListener('change', function() {
   }
 });
 
+function openModalMasseChoice() {
+  const pts = state.points.filter(p => p.dansPanier);
+  if (!pts.length) { showToast('Aucun point sélectionné', 'error'); return; }
+  document.getElementById('masse-choice-count').textContent = pts.length;
+  document.getElementById('modal-masse-choice').classList.add('open');
+}
+function closeModalMasseChoice(e) {
+  if (!e || e.target === document.getElementById('modal-masse-choice'))
+    document.getElementById('modal-masse-choice').classList.remove('open');
+}
+
 function openModalMasse() {
   const pts = state.points.filter(p => p.dansPanier);
   if (!pts.length) { showToast('Aucun point sélectionné', 'error'); return; }
@@ -1771,6 +1979,52 @@ async function applyMasse() {
   if (!targets.length) { showToast('Aucun point sélectionné', 'error'); return; }
   targets.forEach(p => { p[key] = value; });
   saveLocal(); closeModalMasse(); renderPanier(); refreshMapMarkers();
+  showToast(targets.length + ' point' + (targets.length > 1 ? 's' : '') + ' modifié' + (targets.length > 1 ? 's' : '') + ' — sync…', 'success');
+  for (const p of targets) { await syncPointToSheets(p); }
+  updateStatus();
+}
+
+// ── MODAL MASSE — toutes les caractéristiques en une fois ──
+const masseAllFields = [
+  ['ma-id-armoire', 'idArmoire', 'text'],
+  ['ma-nbr-supports', 'nbrSupports', 'text'],
+  ['ma-type-support', 'typeSupport', 'text'],
+  ['ma-etat-support', 'etatSupport', 'text'],
+  ['ma-hauteur', 'hauteur', 'text'],
+  ['ma-type-attache', 'typeAttache', 'text'],
+  ['ma-nbr-luminaires', 'nbrLuminaires', 'text'],
+  ['ma-type-luminaire', 'typeLuminaire', 'text'],
+  ['ma-etat-luminaire', 'etatLuminaire', 'text'],
+  ['ma-technologie', 'technologie', 'text'],
+  ['ma-puissance', 'puissance', 'text'],
+  ['ma-classe-precision', 'classePrecision', 'text'],
+  ['ma-observations', 'observations', 'text'],
+];
+function openModalMasseAll() {
+  const pts = state.points.filter(p => p.dansPanier);
+  if (!pts.length) { showToast('Aucun point sélectionné', 'error'); return; }
+  document.getElementById('masse-all-count').textContent = pts.length;
+  document.getElementById('masse-all-count2').textContent = pts.length;
+  masseAllFields.forEach(([id]) => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('modal-masse-all').classList.add('open');
+}
+function closeModalMasseAll(e) {
+  if (!e || e.target === document.getElementById('modal-masse-all'))
+    document.getElementById('modal-masse-all').classList.remove('open');
+}
+async function applyMasseAll() {
+  const targets = state.points.filter(p => p.dansPanier);
+  if (!targets.length) { showToast('Aucun point sélectionné', 'error'); return; }
+  const patch = {};
+  masseAllFields.forEach(([id, key]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const v = el.value.trim();
+    if (v !== '') patch[key] = v;
+  });
+  if (!Object.keys(patch).length) { showToast('Aucun champ rempli', 'error'); return; }
+  targets.forEach(p => { Object.assign(p, patch); });
+  saveLocal(); closeModalMasseAll(); renderPanier(); refreshMapMarkers();
   showToast(targets.length + ' point' + (targets.length > 1 ? 's' : '') + ' modifié' + (targets.length > 1 ? 's' : '') + ' — sync…', 'success');
   for (const p of targets) { await syncPointToSheets(p); }
   updateStatus();
@@ -1822,10 +2076,12 @@ async function loadFromSheets() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     const byId = new Map(state.points.map(p => [String(p.id), p]));
+    let tombstones = new Set();
+    try { tombstones = new Set((await DB.all('tombstones')).map(t => t.id)); } catch (e) {}
     let added = 0;
     (data.rows || []).forEach(r => {
       const id = String(r['ID'] || '');
-      if (!id || byId.has(id)) return;   // ne JAMAIS écraser un point local non synchronisé
+      if (!id || byId.has(id) || tombstones.has(id)) return;   // ne JAMAIS écraser un point local non synchronisé ni réimporter un point supprimé
       byId.set(id, mapServerRow(r));
       added++;
     });
