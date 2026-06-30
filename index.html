@@ -556,6 +556,13 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .cache-progress .bar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
 .cache-progress .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 .cache-progress .pct{font-family:var(--font-mono);font-size:12px;color:var(--accent);margin-top:8px}
+.map-ctrl-btn.active{background:var(--accent);border-color:var(--accent)}
+.map-ctrl-btn.active svg{stroke:#04222e}
+.map-precache{position:absolute;left:12px;bottom:calc(var(--bottom-nav) + 16px);width:40px;height:40px;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:pointer}
+.map-precache:active{opacity:.8}
+.lasso-hint{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:60;background:rgba(56,189,248,.16);border:1px solid var(--accent);color:var(--accent);font-size:12px;padding:6px 14px;border-radius:999px;display:none;white-space:nowrap}
+.lasso-hint.show{display:block}
+.leaflet-container.lasso-on{cursor:crosshair}
 </style>
 </head>
 <body>
@@ -667,13 +674,20 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="map-ctrl-btn" onclick="centerOnMe()" title="Me localiser">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5"><circle cx="9" cy="9" r="3"/><path d="M9 1v2M9 15v2M1 9h2M15 9h2" stroke-linecap="round"/></svg>
     </div>
-    <div class="map-ctrl-btn" onclick="precacheVisibleArea()" title="Précharger la carte de cette zone (à faire en réseau, avant le terrain)">
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12V2M5 8l4 4 4-4M2 12v3a1 1 0 001 1h12a1 1 0 001-1v-3"/></svg>
+    <div class="map-ctrl-btn" id="pose-btn" onclick="togglePose()" title="Mode pose : taper la carte pour poser un point">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1.5a4.5 4.5 0 00-4.5 4.5c0 3.2 4.5 9.5 4.5 9.5s4.5-6.3 4.5-9.5A4.5 4.5 0 009 1.5z"/><circle cx="9" cy="6" r="1.6"/></svg>
+    </div>
+    <div class="map-ctrl-btn" id="lasso-btn" onclick="toggleLasso()" title="Lasso : entourer des points pour les sélectionner">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="9" cy="6.5" rx="6.5" ry="4.5" stroke-dasharray="3 2.5"/><path d="M6 10.5c0 2 .8 4 .8 4"/></svg>
     </div>
   </div>
   <div class="map-fab" onclick="showForm(null)">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>
   </div>
+  <div class="map-precache" onclick="precacheVisibleArea()" title="Précharger la carte de la zone affichée (en réseau, avant le terrain)">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12V2M5 8l4 4 4-4M2 12v3a1 1 0 001 1h12a1 1 0 001-1v-3"/></svg>
+  </div>
+  <div class="lasso-hint" id="lasso-hint">Lasso actif — entourez les points au doigt</div>
 </div>
 
 <!-- ══════════════════════════════════════════
@@ -902,15 +916,23 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <div class="form-label">Champ à modifier</div>
       <select class="form-select" id="masse-field">
         <option value="">-- Sélectionner --</option>
+        <option value="f-type-support">Type de support</option>
+        <option value="f-type-attache">Type d'attache</option>
         <option value="f-etat-support">État du support</option>
         <option value="f-etat-luminaire">État luminaire</option>
         <option value="f-technologie">Technologie</option>
         <option value="f-type-luminaire">Type de luminaire</option>
+        <option value="f-classe-precision">Classe de précision</option>
+        <option value="f-id-armoire">ID Armoire</option>
       </select>
     </div>
     <div class="form-row" id="masse-value-row" style="display:none">
       <div class="form-label">Nouvelle valeur</div>
       <select class="form-select" id="masse-value"></select>
+    </div>
+    <div class="form-row" id="masse-text-row" style="display:none">
+      <div class="form-label">Nouvelle valeur</div>
+      <input class="form-input" id="masse-text" type="text" placeholder="ex: ARM-001" autocapitalize="characters">
     </div>
     <div class="modal-actions">
       <button class="btn-modal-action" onclick="applyMasse()" style="background:var(--orange-dim);color:var(--orange);border-color:var(--orange)">
@@ -1219,8 +1241,112 @@ function initMap() {
     attribution: '© OpenStreetMap'
   }).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
+  map.on('click', (e) => { if (poseMode && !lassoMode) addPointOnMap(e.latlng); });
+  const cont = map.getContainer();
+  cont.addEventListener('pointerdown', lassoDown);
+  cont.addEventListener('pointermove', lassoMoveHandler, { passive: false });
+  cont.addEventListener('pointerup', lassoUp);
+  cont.addEventListener('pointercancel', lassoUp);
   loadFromSheets();
   centerOnMe();
+}
+
+/* ════════ Mode Pose (poser un point en touchant la carte) ════════ */
+let poseMode = false;
+function togglePose() {
+  poseMode = !poseMode;
+  if (poseMode && lassoMode) toggleLasso();      // modes exclusifs
+  document.getElementById('pose-btn').classList.toggle('active', poseMode);
+  showToast(poseMode ? 'Mode pose : tapez la carte pour poser un point' : 'Mode pose désactivé', '');
+}
+function addPointOnMap(latlng) {
+  const pt = {
+    id: generateId(),
+    chantier: state.chantier,
+    technicien: state.technicien,
+    date: new Date().toISOString().split('T')[0],
+    lat: latlng.lat, lng: latlng.lng,
+    gpsAccuracy: null,
+    sourcePosition: 'Carte (manuel)',
+    classePrecision: 'C',
+    idArmoire: '',
+    nbrSupports: '', typeSupport: '', etatSupport: '', hauteur: '',
+    typeAttache: '', nbrLuminaires: '', typeLuminaire: '', etatLuminaire: '',
+    technologie: '', puissance: '', observations: '',
+    dansPanier: false,
+    photos: { luminaire: false, mat: false, classe2: false }
+  };
+  state.points.push(pt);
+  saveLocal();
+  refreshMapMarkers();
+  syncPointToSheets(pt);
+  updateStatus();
+  showToast('Point posé — caractérisez-le ensuite', 'success');
+}
+
+/* ════════ Lasso (sélection libre au doigt) ════════ */
+let lassoMode = false, lassoActive = false, lassoPts = [], lassoLine = null;
+function toggleLasso() {
+  lassoMode = !lassoMode;
+  if (lassoMode && poseMode) togglePose();        // modes exclusifs
+  document.getElementById('lasso-btn').classList.toggle('active', lassoMode);
+  document.getElementById('lasso-hint').classList.toggle('show', lassoMode);
+  if (map) map.getContainer().classList.toggle('lasso-on', lassoMode);
+  if (lassoMode) { map.dragging.disable(); map.doubleClickZoom.disable(); if (map.touchZoom) map.touchZoom.disable(); }
+  else { map.dragging.enable(); map.doubleClickZoom.enable(); if (map.touchZoom) map.touchZoom.enable(); clearLasso(); }
+}
+function clearLasso() { lassoActive = false; lassoPts = []; if (lassoLine) { map.removeLayer(lassoLine); lassoLine = null; } }
+function _evLatLng(ev) {
+  const rect = map.getContainer().getBoundingClientRect();
+  return map.containerPointToLatLng([ev.clientX - rect.left, ev.clientY - rect.top]);
+}
+function lassoDown(ev) {
+  if (!lassoMode) return;
+  ev.preventDefault();
+  lassoActive = true;
+  lassoPts = [_evLatLng(ev)];
+  if (lassoLine) map.removeLayer(lassoLine);
+  lassoLine = L.polyline(lassoPts, { color: '#38bdf8', weight: 3, dashArray: '6 5' }).addTo(map);
+}
+function lassoMoveHandler(ev) {
+  if (!lassoMode || !lassoActive) return;
+  ev.preventDefault();
+  lassoPts.push(_evLatLng(ev));
+  lassoLine.setLatLngs(lassoPts);
+}
+function lassoUp() {
+  if (!lassoMode || !lassoActive) return;
+  lassoActive = false;
+  finishLasso();
+}
+function pointInPoly(lat, lng, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].lng, yi = poly[i].lat, xj = poly[j].lng, yj = poly[j].lat;
+    const hit = ((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+function finishLasso() {
+  const poly = lassoPts.slice();
+  clearLasso();
+  // sortie du mode lasso
+  lassoMode = false;
+  document.getElementById('lasso-btn').classList.remove('active');
+  document.getElementById('lasso-hint').classList.remove('show');
+  map.getContainer().classList.remove('lasso-on');
+  map.dragging.enable(); map.doubleClickZoom.enable(); if (map.touchZoom) map.touchZoom.enable();
+  if (poly.length < 3) { showToast('Tracé trop court', 'error'); return; }
+  let count = 0;
+  state.points.forEach(p => {
+    if (p.lat == null || p.lng == null) return;
+    if (pointInPoly(p.lat, p.lng, poly)) { p.dansPanier = true; count++; }
+  });
+  saveLocal();
+  refreshMapMarkers();
+  if (count) { showToast(count + ' point' + (count > 1 ? 's' : '') + ' sélectionné' + (count > 1 ? 's' : ''), 'success'); openModalMasse(); }
+  else showToast('Aucun point dans la zone', '');
 }
 
 function getMarkerColor(pt) {
@@ -1560,46 +1686,68 @@ function viderPanier() {
 
 // ── MODAL MASSE ──
 const masseOptions = {
+  'f-type-support': ['Mât droit','Console','Potence','Candélabre','Encastré sol','Façade'],
+  'f-type-attache': ['Bride','Crosse','Platine','Direct'],
   'f-etat-support': ['Bon','Moyen','Mauvais','À remplacer'],
   'f-etat-luminaire': ['Bon','Moyen','Mauvais','À remplacer'],
   'f-technologie': ['LED','Sodium HP','Sodium BP','Iodures métalliques','Fluo compact'],
   'f-type-luminaire': ['Lanterne','Projecteur','Hublot','Borne','Applique','Globe'],
+  'f-classe-precision': ['C','B','A'],
 };
+const masseTextFields = ['f-id-armoire'];
 const masseKeys = {
+  'f-type-support': 'typeSupport',
+  'f-type-attache': 'typeAttache',
   'f-etat-support': 'etatSupport',
   'f-etat-luminaire': 'etatLuminaire',
   'f-technologie': 'technologie',
   'f-type-luminaire': 'typeLuminaire',
+  'f-classe-precision': 'classePrecision',
+  'f-id-armoire': 'idArmoire',
 };
 
 document.getElementById('masse-field').addEventListener('change', function() {
-  const opts = masseOptions[this.value];
-  const row = document.getElementById('masse-value-row');
+  const f = this.value;
+  const selRow = document.getElementById('masse-value-row');
+  const txtRow = document.getElementById('masse-text-row');
   const sel = document.getElementById('masse-value');
-  if (opts) {
-    sel.innerHTML = opts.map(o => `<option>${o}</option>`).join('');
-    row.style.display = 'block';
-  } else { row.style.display = 'none'; }
+  if (masseOptions[f]) {
+    sel.innerHTML = masseOptions[f].map(o => `<option>${o}</option>`).join('');
+    selRow.style.display = 'block'; txtRow.style.display = 'none';
+  } else if (masseTextFields.includes(f)) {
+    selRow.style.display = 'none'; txtRow.style.display = 'block';
+  } else {
+    selRow.style.display = 'none'; txtRow.style.display = 'none';
+  }
 });
 
 function openModalMasse() {
   const pts = state.points.filter(p => p.dansPanier);
-  if (!pts.length) { showToast('Panier vide', 'error'); return; }
+  if (!pts.length) { showToast('Aucun point sélectionné', 'error'); return; }
+  document.getElementById('masse-count').textContent = pts.length;
+  document.getElementById('masse-field').value = '';
+  document.getElementById('masse-value-row').style.display = 'none';
+  document.getElementById('masse-text-row').style.display = 'none';
   document.getElementById('modal-masse').classList.add('open');
 }
 function closeModalMasse(e) {
   if (!e || e.target === document.getElementById('modal-masse'))
     document.getElementById('modal-masse').classList.remove('open');
 }
-function applyMasse() {
+async function applyMasse() {
   const field = document.getElementById('masse-field').value;
-  const value = document.getElementById('masse-value').value;
   const key = masseKeys[field];
   if (!field || !key) { showToast('Sélectionnez un champ', 'error'); return; }
-  let count = 0;
-  state.points.filter(p => p.dansPanier).forEach(p => { p[key] = value; count++; });
+  const value = masseTextFields.includes(field)
+    ? document.getElementById('masse-text').value.trim()
+    : document.getElementById('masse-value').value;
+  const targets = state.points.filter(p => p.dansPanier);
+  if (!targets.length) { showToast('Aucun point sélectionné', 'error'); return; }
+  targets.forEach(p => { p[key] = value; });
   saveLocal(); closeModalMasse(); renderPanier(); refreshMapMarkers();
-  showToast(count + ' point' + (count>1?'s':'') + ' modifié' + (count>1?'s':''), 'success');
+  showToast(targets.length + ' point' + (targets.length > 1 ? 's' : '') + ' modifié' + (targets.length > 1 ? 's' : '') + ' — sync…', 'success');
+  for (const p of targets) { await syncPointToSheets(p); }
+  updateStatus();
 }
 
 updateOfflineBanner();
