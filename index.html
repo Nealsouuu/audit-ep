@@ -187,7 +187,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 20px rgba(56,189,248,0.4);
   cursor: pointer;
-  z-index: 50;
+  z-index: 750;
   transition: transform .15s;
 }
 .map-fab:active { transform: scale(0.92); }
@@ -195,7 +195,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   position: absolute;
   top: 60px; right: 12px;
   display: flex; flex-direction: column; gap: 8px;
-  z-index: 50;
+  z-index: 750;
 }
 .map-ctrl-btn {
   width: 40px; height: 40px;
@@ -430,7 +430,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   position: absolute; inset: 0;
   background: rgba(0,0,0,0.6);
   display: none; align-items: flex-end; justify-content: center;
-  z-index: 200;
+  z-index: 800;
 }
 .modal-overlay.open { display: flex; }
 .modal {
@@ -476,7 +476,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   padding: 10px 18px;
   font-size: 13px;
   color: var(--text);
-  z-index: 300;
+  z-index: 850;
   opacity: 0;
   transition: all .3s;
   white-space: nowrap;
@@ -558,9 +558,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .cache-progress .pct{font-family:var(--font-mono);font-size:12px;color:var(--accent);margin-top:8px}
 .map-ctrl-btn.active{background:var(--accent);border-color:var(--accent)}
 .map-ctrl-btn.active svg{stroke:#04222e}
-.map-precache{position:absolute;left:12px;bottom:calc(var(--bottom-nav) + 16px);width:40px;height:40px;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:pointer}
+.map-precache{position:absolute;left:12px;bottom:calc(var(--bottom-nav) + 16px);width:40px;height:40px;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;z-index:750;box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:pointer}
 .map-precache:active{opacity:.8}
-.lasso-hint{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:60;background:rgba(56,189,248,.16);border:1px solid var(--accent);color:var(--accent);font-size:12px;padding:6px 14px;border-radius:999px;display:none;white-space:nowrap}
+.lasso-hint{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:750;background:rgba(56,189,248,.16);border:1px solid var(--accent);color:var(--accent);font-size:12px;padding:6px 14px;border-radius:999px;display:none;white-space:nowrap}
 .lasso-hint.show{display:block}
 .leaflet-container.lasso-on{cursor:crosshair}
 </style>
