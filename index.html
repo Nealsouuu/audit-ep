@@ -694,7 +694,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="map-ctrl-btn" id="lasso-btn" onclick="toggleLasso()" title="Lasso : entourer des points pour les sélectionner">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="9" cy="6.5" rx="6.5" ry="4.5" stroke-dasharray="3 2.5"/><path d="M6 10.5c0 2 .8 4 .8 4"/></svg>
     </div>
-    <div class="map-ctrl-btn" id="sat-btn" onclick="toggleSatellite()" title="Vue satellite">
+    <div class="map-ctrl-btn" id="sat-btn" onclick="toggleSatellite()" title="Fond de carte : Plan → Satellite IGN → Satellite Esri">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="10" y="10" width="6" height="6" rx="1"/></svg>
     </div>
   </div>
@@ -1385,20 +1385,29 @@ function showScreen(name) {
 function goBack() { showScreen(currentScreen === 'form' ? 'map' : state.previousScreen); }
 
 // ── MAP ──
-let map, markersLayer, osmLayer, satLayer, satOn = false;
+let map, markersLayer, osmLayer, satLayer, ignLayer, baseMode = 0; // 0=Plan, 1=Satellite IGN, 2=Satellite Esri
 function initMap() {
   if (map) return; // évite une double init
-  map = L.map('map', { zoomControl: false, attributionControl: false }).setView([16.25, -61.55], 11);
+  map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 21 }).setView([16.25, -61.55], 11);
   osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
+    maxZoom: 21,
+    maxNativeZoom: 19,
     crossOrigin: true,
     attribution: '© OpenStreetMap'
   }).addTo(map);
   // Imagerie satellite Esri World Imagery (gratuite, sans clé) — l'autre fond de carte alterné au bouton.
   satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19,
+    maxZoom: 21,
+    maxNativeZoom: 18,
     crossOrigin: true,
     attribution: 'Tiles © Esri'
+  });
+  // Orthophotos IGN (Géoplateforme, gratuit sans clé) — imagerie française haute résolution, couvre la Guadeloupe.
+  ignLayer = L.tileLayer('https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}', {
+    maxZoom: 21,
+    maxNativeZoom: 19,
+    crossOrigin: true,
+    attribution: 'Orthophotos © IGN'
   });
   markersLayer = L.layerGroup().addTo(map);
   map.on('click', (e) => { if (poseMode && !lassoMode) addPointOnMap(e.latlng); });
@@ -1412,13 +1421,22 @@ function initMap() {
 }
 
 // Bascule entre le fond de carte OpenStreetMap (plan) et l'imagerie satellite Esri.
+// Fait défiler les fonds de carte à chaque appui : Plan → Satellite IGN → Satellite Esri → Plan.
+const BASEMODES = [
+  { name: 'Plan', get: () => osmLayer },
+  { name: 'Satellite IGN', get: () => ignLayer },
+  { name: 'Satellite Esri', get: () => satLayer }
+];
 function toggleSatellite() {
   if (!map) return;
-  satOn = !satOn;
-  if (satOn) { map.removeLayer(osmLayer); satLayer.addTo(map); }
-  else { map.removeLayer(satLayer); osmLayer.addTo(map); }
+  const prev = BASEMODES[baseMode].get();
+  baseMode = (baseMode + 1) % BASEMODES.length;
+  const next = BASEMODES[baseMode];
+  if (prev) map.removeLayer(prev);
+  next.get().addTo(map);
   const btn = document.getElementById('sat-btn');
-  if (btn) btn.classList.toggle('active', satOn);
+  if (btn) btn.classList.toggle('active', baseMode !== 0);
+  showToast(next.name, '');
 }
 
 /* ════════ Mode Pose (poser un point en touchant la carte) ════════ */
