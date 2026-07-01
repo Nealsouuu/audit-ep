@@ -1418,6 +1418,7 @@ function initMap() {
   cont.addEventListener('pointercancel', lassoUp);
   loadFromSheets();
   centerOnMe();
+  startPolling();   // rafraîchit depuis le Sheet toutes les 30 s (si en ligne + app au premier plan)
 }
 
 // Bascule entre le fond de carte OpenStreetMap (plan) et l'imagerie satellite Esri.
@@ -2083,35 +2084,76 @@ function mapServerRow(r) {
     photos: {}
   };
 }
-async function loadFromSheets() {
-  await loadLocal();                 // points locaux d'abord = source de vérité hors-ligne
-  refreshMapMarkers();
-  if (!navigator.onLine) return;
+// ── Polling automatique : reflète les modifs faites dans le Sheet (ajouts ET suppressions) ──
+let pollTimer = null, isLoading = false;
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(() => {
+    if (navigator.onLine && !isLoading && document.visibilityState === 'visible') loadFromSheets(true);
+  }, 30000);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function loadFromSheets(silent) {
+  if (isLoading) return;                 // évite les chargements qui se chevauchent
+  isLoading = true;
   try {
-    showToast('Synchronisation serveur…');
-    const url = SCRIPT_URL + '?sheet=Points%20Lumineux&chantier=' + encodeURIComponent(state.chantier);
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    const byId = new Map(state.points.map(p => [String(p.id), p]));
-    let tombstones = new Set();
-    try { tombstones = new Set((await DB.all('tombstones')).map(t => t.id)); } catch (e) {}
-    let added = 0;
-    (data.rows || []).forEach(r => {
-      const id = String(r['ID'] || '');
-      if (!id || byId.has(id) || tombstones.has(id)) return;   // ne JAMAIS écraser un point local non synchronisé ni réimporter un point supprimé
-      byId.set(id, mapServerRow(r));
-      added++;
-    });
-    state.points = [...byId.values()];
-    saveLocal();
+    await loadLocal();                   // points locaux d'abord = source de vérité hors-ligne
     refreshMapMarkers();
-    showToast(added ? (added + ' points serveur ajoutés ✓') : 'À jour ✓', 'success');
-  } catch(e) {
-    console.error('Load error:', e);
-    showToast('Mode hors-ligne', '');
+    if (!navigator.onLine) return;
+    try {
+      if (!silent) showToast('Synchronisation serveur…');
+      const url = SCRIPT_URL + '?sheet=Points%20Lumineux&chantier=' + encodeURIComponent(state.chantier);
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      const byId = new Map(state.points.map(p => [String(p.id), p]));
+      let tombstones = new Set();
+      try { tombstones = new Set((await DB.all('tombstones')).map(t => t.id)); } catch (e) {}
+
+      // 1) Ajouts : points du serveur absents en local (hors supprimés/tombstones)
+      let added = 0;
+      (data.rows || []).forEach(r => {
+        const id = String(r['ID'] || '');
+        if (!id || byId.has(id) || tombstones.has(id)) return;
+        byId.set(id, mapServerRow(r));
+        added++;
+      });
+
+      // 2) Réconciliation descendante : retirer en local les points de CE chantier
+      //    disparus du Sheet. Garde-fous : JAMAIS un point en attente de sync (posé
+      //    hors-ligne, pas encore remonté) ni un point d'un autre chantier. Ne s'exécute
+      //    que si le serveur a répondu correctement → aucune coupure réseau ne peut effacer.
+      const serverIds = new Set((data.rows || []).map(r => String(r['ID'] || '')));
+      let pendingIds = new Set();
+      try { pendingIds = new Set((await DB.all('queue')).map(q => String(q.id))); } catch (e) {}
+      let removed = 0;
+      for (const p of [...byId.values()]) {
+        const pid = String(p.id);
+        if (String(p.chantier) === String(state.chantier) && !serverIds.has(pid) && !pendingIds.has(pid)) {
+          byId.delete(pid);
+          try { await DB.del('points', p.id); } catch (e) {}
+          removed++;
+        }
+      }
+
+      state.points = [...byId.values()];
+      saveLocal();
+      refreshMapMarkers();
+
+      if (removed) showToast(removed + ' point' + (removed > 1 ? 's' : '') + ' retiré' + (removed > 1 ? 's' : '') + ' (supprimé du Sheet)', '');
+      else if (!silent) showToast(added ? (added + ' point' + (added > 1 ? 's' : '') + ' ajouté' + (added > 1 ? 's' : '') + ' ✓') : 'À jour ✓', 'success');
+    } catch (e) {
+      console.error('Load error:', e);
+      if (!silent) showToast('Mode hors-ligne', '');
+    }
+    flushSyncQueue();                    // pousse les points locaux en attente
+  } finally {
+    isLoading = false;
   }
-  flushSyncQueue();                    // pousse les points locaux en attente
 }
 
 // ── ÉCRIRE un point via Apps Script ──
