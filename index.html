@@ -281,6 +281,39 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   appearance: none;
 }
 .form-select option { background: var(--bg2); }
+/* ── Armoire custom dropdown ── */
+.armoire-wrap { position: relative; width: 100%; }
+.armoire-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--bg2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 820;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.armoire-dropdown.open { display: block; }
+.armoire-option {
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.armoire-option:last-child { border-bottom: none; }
+.armoire-option:active, .armoire-option.hover { background: var(--accent-dim); color: var(--accent); }
+.armoire-option svg { flex-shrink: 0; opacity: .5; }
+.armoire-empty {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text2);
+  font-style: italic;
+}
 .gps-row {
   background: var(--bg2);
   border: 1px solid var(--border2);
@@ -758,10 +791,14 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
 
     <div class="form-section-title">Armoire de rattachement</div>
-    <div class="form-row">
+    <div class="form-row" style="position:relative">
       <div class="form-label">ID Armoire</div>
-      <input class="form-input" type="text" id="f-id-armoire" list="armoire-list" placeholder="ex: ARM-001" autocapitalize="characters">
-      <datalist id="armoire-list"></datalist>
+      <div class="armoire-wrap">
+        <input class="form-input" type="text" id="f-id-armoire" placeholder="ex: ARM-001"
+               autocapitalize="characters" autocomplete="off"
+               oninput="armoireFilter()" onfocus="armoireOpen()" onblur="setTimeout(armoireClose, 200)">
+        <div class="armoire-dropdown" id="armoire-dropdown"></div>
+      </div>
     </div>
 
     <div class="form-section-title">Support</div>
@@ -1303,6 +1340,7 @@ let state = {
   technicien: '',
   chantier: '',
   points: [],
+  armoires: [],          // noms d'armoires récupérés depuis la feuille "Armoires" (+ ceux saisis dans les points)
   currentPoint: null,
   previousScreen: 'map',
   panierInForm: false,
@@ -1335,6 +1373,52 @@ function showToast(msg, type='') {
 const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => _escMap[c]);
+}
+
+// ── Dropdown armoires ──────────────────────────────────────────────────
+// Fusionne : noms venant de la feuille "Armoires" du Sheet (si elle existe)
+// + IDs déjà saisis sur d'autres points du même chantier.
+function getArmoireOptions() {
+  const fromSheet  = (state.armoires || []).map(a => String(a).trim()).filter(Boolean);
+  const fromPoints = state.points.map(p => String(p.idArmoire || '').trim()).filter(Boolean);
+  return [...new Set([...fromSheet, ...fromPoints])].sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+}
+function buildArmoireList() { /* appelé à l'ouverture de la fiche — rien à faire, le dropdown se construit à la volée */ }
+
+function armoireOpen() {
+  const val = document.getElementById('f-id-armoire').value.trim();
+  renderArmoireDropdown(val);
+}
+function armoireClose() {
+  document.getElementById('armoire-dropdown').classList.remove('open');
+}
+function armoireFilter() {
+  const val = document.getElementById('f-id-armoire').value.trim();
+  renderArmoireDropdown(val);
+}
+function renderArmoireDropdown(filter) {
+  const dd = document.getElementById('armoire-dropdown');
+  const opts = getArmoireOptions();
+  const fl = filter.toLowerCase();
+  const matches = fl ? opts.filter(o => o.toLowerCase().includes(fl)) : opts;
+
+  if (!matches.length) {
+    dd.innerHTML = '<div class="armoire-empty">' + (opts.length ? 'Aucune correspondance' : 'Aucune armoire enregistrée') + '</div>';
+  } else {
+    dd.innerHTML = matches.map(o => {
+      const hl = fl
+        ? escapeHtml(o).replace(new RegExp('(' + escapeHtml(fl).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi'), '<strong style="color:var(--accent)">$1</strong>')
+        : escapeHtml(o);
+      return '<div class="armoire-option" onmousedown="armoireSelect(\'' + escapeHtml(o) + '\')">' +
+        '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="12" height="12" rx="2"/><path d="M4 7h6M4 4.5h6M4 9.5h4"/></svg>' +
+        hl + '</div>';
+    }).join('');
+  }
+  dd.classList.add('open');
+}
+function armoireSelect(value) {
+  document.getElementById('f-id-armoire').value = value;
+  document.getElementById('armoire-dropdown').classList.remove('open');
 }
 
 // ── STOCKAGE LOCAL (IndexedDB) ──
@@ -1687,13 +1771,8 @@ function showForm(pt) {
   document.getElementById('f-observations').value = pt ? (pt.observations || '') : '';
   document.getElementById('f-id-armoire').value = pt ? (pt.idArmoire || '') : '';
   document.getElementById('f-classe-precision').value = pt ? (pt.classePrecision || 'C') : 'C';
-
-  // Datalist : armoires enregistrées en priorité, + IDs déjà saisis sur des points
-  const dl = document.getElementById('armoire-list');
-  const fromArmoires = state.armoires.map(a => a.id);
-  const fromPoints   = state.points.map(p => p.idArmoire).filter(Boolean);
-  const allArmoires  = [...new Set([...fromArmoires, ...fromPoints])].sort();
-  dl.innerHTML = allArmoires.map(a => '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>').join('');
+  // Pré-construire la liste d'armoires dès l'ouverture de la fiche
+  buildArmoireList();
 
   const toggle = document.getElementById('toggle-panier');
   toggle.classList.toggle('on', state.panierInForm);
@@ -2138,6 +2217,18 @@ async function loadFromSheets(silent) {
       const res = await fetch(url);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+
+      // Charger aussi la feuille "Armoires" pour la liste déroulante (erreur silencieuse si absente)
+      try {
+        const armoiresUrl = SCRIPT_URL + '?sheet=Armoires';
+        const armoiresRes = await fetch(armoiresUrl);
+        const armoiresData = await armoiresRes.json();
+        if (!armoiresData.error && armoiresData.rows) {
+          state.armoires = armoiresData.rows
+            .map(r => String(r['ID'] || r['Nom'] || r['id'] || r['nom'] || Object.values(r)[0] || '').trim())
+            .filter(Boolean);
+        }
+      } catch (e) { /* feuille Armoires absente ou indisponible — on utilisera les IDs des points */ }
 
       const byId = new Map(state.points.map(p => [String(p.id), p]));
       let tombstones = new Set();
