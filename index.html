@@ -389,6 +389,37 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 /* ── PANIER SCREEN ── */
 #screen-panier { padding-bottom: var(--bottom-nav); overflow: hidden; }
 .panier-scroll { flex: 1; overflow-y: auto; padding: 12px; }
+/* ── Armoires ── */
+#screen-armoires { padding-bottom: var(--bottom-nav); overflow: hidden; }
+#screen-armoire-form { overflow: hidden; }
+.armoire-item {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.armoire-item:active { opacity: 0.8; }
+.armoire-icon {
+  width: 38px; height: 38px; flex-shrink: 0;
+  background: rgba(251,146,60,0.15);
+  border: 1px solid rgba(251,146,60,0.4);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+.armoire-item-body { flex: 1; min-width: 0; }
+.armoire-item-id { font-weight: 700; font-size: 15px; color: var(--text1); }
+.armoire-item-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.armoire-item-badge {
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(251,146,60,0.15); color: #fb923c;
+  white-space: nowrap;
+}
 .panier-actions {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
@@ -917,9 +948,136 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
     <span class="nav-label">Liste</span>
   </div>
+  <div class="nav-item" id="nav-armoires" onclick="showScreen('armoires')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/><path d="M12 14h.01M12 17h.01"/></svg>
+    <span class="nav-label">Armoires</span>
+  </div>
   <div class="nav-item" id="nav-panier" onclick="showScreen('panier')">
     <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/><path d="M16 10a4 4 0 01-8 0"/></svg>
     <span class="nav-label">Panier</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     ÉCRAN ARMOIRES (liste)
+══════════════════════════════════════════ -->
+<div class="screen" id="screen-armoires">
+  <div class="topbar">
+    <div style="flex:1">
+      <div class="topbar-title">Armoires</div>
+      <div class="topbar-sub" id="armoires-sub">0 armoire(s)</div>
+    </div>
+    <button class="btn-save-top" onclick="showArmoireForm(null)" style="display:flex;align-items:center;gap:6px">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 1v12M1 7h12"/></svg>
+      Ajouter
+    </button>
+  </div>
+  <div class="list-scroll" id="armoires-scroll"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     ÉCRAN FORMULAIRE ARMOIRE
+══════════════════════════════════════════ -->
+<div class="screen" id="screen-armoire-form">
+  <div class="topbar">
+    <button class="btn-back" onclick="goBack()">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 3L5 8l5 5"/></svg>
+      Retour
+    </button>
+    <button class="btn-save-top" onclick="saveArmoire()">Enregistrer</button>
+    <div style="flex:1;text-align:center">
+      <div class="topbar-title" id="armoire-form-title">Nouvelle armoire</div>
+      <div class="topbar-sub" id="armoire-form-id-label"></div>
+    </div>
+  </div>
+  <div class="form-scroll">
+
+    <div class="form-section-title">Localisation GPS</div>
+    <div class="form-row">
+      <div class="gps-row">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#fb923c" stroke-width="1.5"><circle cx="8" cy="7" r="2.5"/><path d="M8 1a6 6 0 010 12C5 13 2 10 2 7a6 6 0 016-6z"/></svg>
+        <div class="gps-coords empty" id="arm-gps-display">Appuyer pour capturer</div>
+        <button class="gps-btn" onclick="captureGPSArmoire()">📍 GPS</button>
+      </div>
+    </div>
+
+    <div class="form-section-title">Identification</div>
+    <div class="form-row">
+      <div class="form-label">ID Armoire <span class="req">●</span></div>
+      <input class="form-input" type="text" id="af-id" placeholder="ex: ARM-001" autocapitalize="characters">
+    </div>
+
+    <div class="form-section-title">État</div>
+    <div class="form-row">
+      <div class="form-label">État extérieur <span class="req">●</span></div>
+      <select class="form-select" id="af-etat-ext">
+        <option value="">-- Sélectionner --</option>
+        <option>Bon</option><option>Moyen</option><option>Mauvais</option><option>À remplacer</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-label">État intérieur <span class="req">●</span></div>
+      <select class="form-select" id="af-etat-int">
+        <option value="">-- Sélectionner --</option>
+        <option>Bon</option><option>Moyen</option><option>Mauvais</option><option>À remplacer</option>
+      </select>
+    </div>
+
+    <div class="form-section-title">Alimentation</div>
+    <div class="form-row">
+      <div class="form-label">Abonnement (kVA)</div>
+      <input class="form-input" type="number" id="af-abonnement" placeholder="ex: 36" min="0" step="0.01">
+    </div>
+    <div class="form-row">
+      <div class="form-label">Câble d'alimentation</div>
+      <select class="form-select" id="af-cable">
+        <option value="">-- Sélectionner --</option>
+        <option>Aérien</option><option>Souterrain</option><option>Mixte</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-label">Nombre de départs</div>
+      <input class="form-input" type="number" id="af-departs" placeholder="ex: 4" min="1" max="20">
+    </div>
+    <div class="form-row">
+      <div class="form-label">Type de protection</div>
+      <select class="form-select" id="af-protection">
+        <option value="">-- Sélectionner --</option>
+        <option>Disjoncteur</option><option>Fusible</option><option>Interrupteur différentiel</option><option>Autre</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-label">Horloge / Télégestion</div>
+      <select class="form-select" id="af-horloge">
+        <option value="">-- Sélectionner --</option>
+        <option>Horloge astronomique</option><option>Télégestion</option><option>Cellule photoélectrique</option><option>Manuel</option><option>Aucun</option>
+      </select>
+    </div>
+
+    <div class="form-section-title">Photos</div>
+    <div class="photo-grid">
+      <div class="photo-slot" id="photo-arm_ext" onclick="takeArmoirePhoto('arm_ext')">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="#64748b" stroke-width="1.5"><rect x="2" y="6" width="18" height="13" rx="3"/><circle cx="11" cy="13" r="3"/><path d="M8 6l1.5-3h3L14 6"/></svg>
+        <div class="photo-label">Extérieur</div>
+      </div>
+      <div class="photo-slot" id="photo-arm_int" onclick="takeArmoirePhoto('arm_int')">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="#64748b" stroke-width="1.5"><rect x="2" y="6" width="18" height="13" rx="3"/><circle cx="11" cy="13" r="3"/><path d="M8 6l1.5-3h3L14 6"/></svg>
+        <div class="photo-label">Intérieur</div>
+      </div>
+      <div class="photo-slot" id="photo-arm_compteur" onclick="takeArmoirePhoto('arm_compteur')">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="#64748b" stroke-width="1.5"><rect x="2" y="6" width="18" height="13" rx="3"/><circle cx="11" cy="13" r="3"/><path d="M8 6l1.5-3h3L14 6"/></svg>
+        <div class="photo-label">Compteur</div>
+      </div>
+    </div>
+
+    <div class="form-section-title">Observations</div>
+    <div class="form-row">
+      <textarea class="form-input" id="af-observations" rows="3" placeholder="Notes libres..."></textarea>
+    </div>
+
+  </div>
+  <div class="form-actions">
+    <button class="btn-save" onclick="saveArmoire()">Enregistrer</button>
   </div>
 </div>
 
@@ -1101,16 +1259,15 @@ const DB = (() => {
   function open() {
     if (_db) return Promise.resolve(_db);
     return new Promise((resolve, reject) => {
-      const r = indexedDB.open('auditEP', 2);
+      const r = indexedDB.open('auditEP', 3);
       r.onupgradeneeded = (e) => {
         const db = e.target.result;
-        if (!db.objectStoreNames.contains('points')) db.createObjectStore('points', { keyPath: 'id' });
-        if (!db.objectStoreNames.contains('photos')) db.createObjectStore('photos', { keyPath: 'key' });
-        if (!db.objectStoreNames.contains('queue'))  db.createObjectStore('queue',  { keyPath: 'id' });
-        if (!db.objectStoreNames.contains('meta'))   db.createObjectStore('meta',   { keyPath: 'k' });
-        // tombstones : IDs supprimés localement, pour ne pas les réimporter
-        // depuis le Sheet tant que la suppression serveur n'est pas confirmée.
+        if (!db.objectStoreNames.contains('points'))     db.createObjectStore('points',     { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('photos'))     db.createObjectStore('photos',     { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('queue'))      db.createObjectStore('queue',      { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meta'))       db.createObjectStore('meta',       { keyPath: 'k' });
         if (!db.objectStoreNames.contains('tombstones')) db.createObjectStore('tombstones', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('armoires'))   db.createObjectStore('armoires',   { keyPath: 'id' });
       };
       r.onsuccess = () => { _db = r.result; resolve(_db); };
       r.onerror = () => reject(r.error);
@@ -1303,11 +1460,14 @@ let state = {
   technicien: '',
   chantier: '',
   points: [],
+  armoires: [],
   currentPoint: null,
   previousScreen: 'map',
   panierInForm: false,
   photoBlobs: { luminaire: null, mat: null, classe2: null },
-  photoExisting: { luminaire: false, mat: false, classe2: false }
+  photoExisting: { luminaire: false, mat: false, classe2: false },
+  armoirePhotoBlobs: { arm_ext: null, arm_int: null, arm_compteur: null },
+  armoirePhotoExisting: { arm_ext: false, arm_int: false, arm_compteur: false }
 };
 let currentGPSAccuracy = null;
 let currentSourcePosition = '';
@@ -1359,6 +1519,28 @@ function migrateLegacyLocalStorage() {
   try { if (localStorage.getItem('audit_ep_points')) localStorage.removeItem('audit_ep_points'); } catch (e) {}
 }
 
+// ── STOCKAGE LOCAL ARMOIRES ──
+function saveLocalArmoires() {
+  const db_save = async () => {
+    const db = await DB.open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('armoires', 'readwrite');
+      const s = t.objectStore('armoires');
+      s.clear();
+      state.armoires.forEach(a => s.put(a));
+      t.oncomplete = () => res(true);
+      t.onerror = () => rej(t.error);
+    });
+  };
+  db_save().catch(e => { console.error('saveArmoires:', e); showToast('⚠ Échec stockage armoires', 'error'); });
+}
+async function loadLocalArmoires() {
+  try {
+    const arms = await DB.all('armoires');
+    if (arms && arms.length) state.armoires = arms;
+  } catch (e) { console.error('loadArmoires', e); }
+}
+
 // ── LOGIN ──
 async function doLogin() {
   const prenom = document.getElementById('login-prenom').value.trim();
@@ -1368,6 +1550,7 @@ async function doLogin() {
   state.technicien = prenom + ' ' + nom;
   state.chantier = chantier;
   await loadLocal();
+  await loadLocalArmoires();
   document.getElementById('map-chantier-label').textContent = chantier;
   document.getElementById('map-technicien-label').textContent = state.technicien;
   document.getElementById('bottom-nav').style.display = 'flex';
@@ -1379,7 +1562,7 @@ async function doLogin() {
 // ── SCREENS ──
 let currentScreen = 'login';
 function showScreen(name) {
-  if (name !== 'form') state.previousScreen = currentScreen;
+  if (name !== 'form' && name !== 'armoire-form') state.previousScreen = currentScreen;
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -1389,8 +1572,13 @@ function showScreen(name) {
   if (name === 'list') renderList();
   if (name === 'panier') renderPanier();
   if (name === 'map') refreshMapMarkers();
+  if (name === 'armoires') renderArmoires();
 }
-function goBack() { showScreen(currentScreen === 'form' ? 'map' : state.previousScreen); }
+function goBack() {
+  if (currentScreen === 'form') { showScreen('map'); return; }
+  if (currentScreen === 'armoire-form') { showScreen('armoires'); return; }
+  showScreen(state.previousScreen);
+}
 
 // ── MAP ──
 let map, markersLayer, osmLayer, satLayer, ignLayer, baseMode = 0; // 0=Plan, 1=Satellite IGN, 2=Satellite Esri
@@ -1575,6 +1763,28 @@ function refreshMapMarkers() {
         <button class="popup-btn popup-btn-edit" onclick="editFromMap('${pt.id}')">Modifier</button>
         <button class="popup-btn popup-btn-dup" onclick="dupFromMap('${pt.id}')">Dupliquer</button>
         <button class="popup-btn popup-btn-del" onclick="deleteFromMap('${pt.id}')" title="Supprimer">🗑</button>
+      </div>
+    `, { maxWidth: 240 });
+  });
+  // Marqueurs armoires (carré orange avec éclair)
+  state.armoires.forEach(arm => {
+    if (!arm.lat || !arm.lng) return;
+    const nbPts = state.points.filter(p => p.idArmoire === arm.id).length;
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="width:20px;height:20px;background:#fb923c;border:2px solid white;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="white"><path d="M7 1L3 7h4l-2 4 6-6H7L9 1z"/></svg>
+      </div>`,
+      iconSize: [20, 20], iconAnchor: [10, 10]
+    });
+    const marker = L.marker([arm.lat, arm.lng], { icon, zIndexOffset: 500 }).addTo(markersLayer);
+    marker.bindPopup(`
+      <div class="popup-id" style="color:#fb923c">${escapeHtml(arm.id)}</div>
+      <div class="popup-title">Armoire électrique</div>
+      <div style="font-size:12px;color:#94a3b8">${nbPts} point${nbPts > 1 ? 's' : ''} rattaché${nbPts > 1 ? 's' : ''}</div>
+      <div class="popup-actions">
+        <button class="popup-btn popup-btn-edit" onclick="editArmoireFromMap('${arm.id}')">Modifier</button>
+        <button class="popup-btn popup-btn-del" onclick="deleteArmoireFromMap('${arm.id}')" title="Supprimer">🗑</button>
       </div>
     `, { maxWidth: 240 });
   });
@@ -1879,6 +2089,196 @@ function dupliquerPointData(source) {
 }
 
 // ── LIST ──
+// ══════════════════════════════════════════
+// MODULE ARMOIRES
+// ══════════════════════════════════════════
+const ARM_PHOTO_TYPES = ['arm_ext', 'arm_int', 'arm_compteur'];
+function armPhotoLabel(k) {
+  return k === 'arm_ext' ? 'Extérieur' : k === 'arm_int' ? 'Intérieur' : 'Compteur';
+}
+
+let editingArmoireId = null;
+let armGPSLat = null, armGPSLng = null;
+
+function generateArmoireId() {
+  const existing = state.armoires.map(a => a.id);
+  for (let i = 1; i <= 999; i++) {
+    const candidate = 'ARM-' + String(i).padStart(3, '0');
+    if (!existing.includes(candidate)) return candidate;
+  }
+  return 'ARM-' + Date.now().toString(36).toUpperCase().slice(-4);
+}
+
+function renderArmoires() {
+  const scroll = document.getElementById('armoires-scroll');
+  const sub = document.getElementById('armoires-sub');
+  sub.textContent = state.armoires.length + ' armoire' + (state.armoires.length > 1 ? 's' : '');
+  if (!state.armoires.length) {
+    scroll.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--text3)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" style="opacity:.3;margin-bottom:12px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><div>Aucune armoire enregistrée</div><div style="font-size:12px;margin-top:6px">Appuyez sur « Ajouter » pour commencer</div></div>';
+    return;
+  }
+  scroll.innerHTML = state.armoires.map(arm => {
+    const nbPts = state.points.filter(p => p.idArmoire === arm.id).length;
+    const etatColor = arm.etatExt === 'Bon' ? '#4ade80' : arm.etatExt === 'Moyen' ? '#facc15' : arm.etatExt ? '#f87171' : '#64748b';
+    return `<div class="armoire-item" onclick="showArmoireForm(state.armoires.find(a=>a.id==='${arm.id}'))">
+      <div class="armoire-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/><path d="M12 14h.01M12 17h.01"/></svg>
+      </div>
+      <div class="armoire-item-body">
+        <div class="armoire-item-id">${escapeHtml(arm.id)}</div>
+        <div class="armoire-item-sub">
+          <span style="color:${etatColor}">${arm.etatExt || '—'}</span>
+          ${arm.cable ? ' · ' + escapeHtml(arm.cable) : ''}
+          ${arm.abonnement ? ' · ' + arm.abonnement + ' kVA' : ''}
+        </div>
+      </div>
+      <div class="armoire-item-badge">${nbPts} pts</div>
+    </div>`;
+  }).join('');
+}
+
+function showArmoireForm(arm) {
+  editingArmoireId = arm ? arm.id : null;
+  armGPSLat = arm ? arm.lat : null;
+  armGPSLng = arm ? arm.lng : null;
+  state.armoirePhotoBlobs = { arm_ext: null, arm_int: null, arm_compteur: null };
+  state.armoirePhotoExisting = { arm_ext: false, arm_int: false, arm_compteur: false };
+
+  document.getElementById('armoire-form-title').textContent = arm ? 'Modifier armoire' : 'Nouvelle armoire';
+  document.getElementById('armoire-form-id-label').textContent = arm ? arm.id : '';
+  document.getElementById('af-id').value = arm ? arm.id : generateArmoireId();
+  document.getElementById('af-etat-ext').value = arm ? (arm.etatExt || '') : '';
+  document.getElementById('af-etat-int').value = arm ? (arm.etatInt || '') : '';
+  document.getElementById('af-abonnement').value = arm ? (arm.abonnement || '') : '';
+  document.getElementById('af-cable').value = arm ? (arm.cable || '') : '';
+  document.getElementById('af-departs').value = arm ? (arm.departs || '') : '';
+  document.getElementById('af-protection').value = arm ? (arm.protection || '') : '';
+  document.getElementById('af-horloge').value = arm ? (arm.horloge || '') : '';
+  document.getElementById('af-observations').value = arm ? (arm.observations || '') : '';
+
+  const gpsEl = document.getElementById('arm-gps-display');
+  if (arm && arm.lat) {
+    gpsEl.textContent = Number(arm.lat).toFixed(6) + ', ' + Number(arm.lng).toFixed(6);
+    gpsEl.classList.remove('empty');
+  } else {
+    gpsEl.textContent = 'Appuyer pour capturer';
+    gpsEl.classList.add('empty');
+  }
+
+  ARM_PHOTO_TYPES.forEach(k => {
+    const slot = document.getElementById('photo-' + k);
+    if (!slot) return;
+    slot.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="#64748b" stroke-width="1.5"><rect x="2" y="6" width="18" height="13" rx="3"/><circle cx="11" cy="13" r="3"/><path d="M8 6l1.5-3h3L14 6"/></svg><div class="photo-label">${armPhotoLabel(k)}</div>`;
+    slot.onclick = () => takeArmoirePhoto(k);
+    if (arm && arm.photos && arm.photos[k]) {
+      state.armoirePhotoExisting[k] = true;
+      getPhotoBlob(arm.id, k).then(blob => {
+        if (blob && editingArmoireId === arm.id) {
+          slot.innerHTML = '<img src="' + URL.createObjectURL(blob) + '" alt=""><span class="pbadge">✓</span>';
+        }
+      }).catch(() => {});
+    }
+  });
+
+  showScreen('armoire-form');
+}
+
+async function saveArmoire() {
+  const id = document.getElementById('af-id').value.trim().toUpperCase();
+  if (!id) { showToast('ID armoire obligatoire', 'error'); return; }
+  const photos = {};
+  ARM_PHOTO_TYPES.forEach(k => { photos[k] = !!(state.armoirePhotoBlobs[k] || state.armoirePhotoExisting[k]); });
+  const arm = {
+    id,
+    chantier: state.chantier,
+    technicien: state.technicien,
+    date: new Date().toISOString().slice(0, 10),
+    lat: armGPSLat || (editingArmoireId ? (state.armoires.find(a => a.id === editingArmoireId) || {}).lat : null),
+    lng: armGPSLng || (editingArmoireId ? (state.armoires.find(a => a.id === editingArmoireId) || {}).lng : null),
+    etatExt: document.getElementById('af-etat-ext').value,
+    etatInt: document.getElementById('af-etat-int').value,
+    abonnement: document.getElementById('af-abonnement').value,
+    cable: document.getElementById('af-cable').value,
+    departs: document.getElementById('af-departs').value,
+    protection: document.getElementById('af-protection').value,
+    horloge: document.getElementById('af-horloge').value,
+    observations: document.getElementById('af-observations').value,
+    photos
+  };
+
+  // Sauvegarde photos
+  for (const k of ARM_PHOTO_TYPES) {
+    if (state.armoirePhotoBlobs[k]) {
+      await savePhotoBlob(arm.id, k, state.armoirePhotoBlobs[k]).catch(e => console.error('photo armoire', e));
+    }
+  }
+
+  const idx = state.armoires.findIndex(a => a.id === editingArmoireId);
+  if (idx >= 0) {
+    // Si l'ID a changé, nettoyer les points rattachés à l'ancien ID
+    if (editingArmoireId && editingArmoireId !== id) {
+      state.points.forEach(p => { if (p.idArmoire === editingArmoireId) p.idArmoire = id; });
+      saveLocal();
+    }
+    state.armoires[idx] = arm;
+  } else {
+    state.armoires.push(arm);
+  }
+  saveLocalArmoires();
+  refreshMapMarkers();
+  showToast(editingArmoireId ? 'Armoire mise à jour' : 'Armoire enregistrée', 'success');
+  showScreen('armoires');
+}
+
+function captureGPSArmoire() {
+  const btn = document.querySelector('#screen-armoire-form .gps-btn');
+  btn.textContent = '⏳ ...';
+  navigator.geolocation.getCurrentPosition(pos => {
+    armGPSLat = pos.coords.latitude;
+    armGPSLng = pos.coords.longitude;
+    const el = document.getElementById('arm-gps-display');
+    el.textContent = armGPSLat.toFixed(6) + ', ' + armGPSLng.toFixed(6);
+    el.classList.remove('empty');
+    btn.textContent = '✓ OK';
+    setTimeout(() => btn.textContent = '📍 GPS', 1500);
+    showToast('Position capturée', 'success');
+  }, () => { btn.textContent = '📍 GPS'; showToast('GPS indisponible', 'error'); },
+  { enableHighAccuracy: true, timeout: 10000 });
+}
+
+function takeArmoirePhoto(type) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*'; input.capture = 'environment';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const blob = await downscaleToBlob(file);
+      state.armoirePhotoBlobs[type] = blob;
+      const slot = document.getElementById('photo-' + type);
+      if (slot) slot.innerHTML = '<img src="' + URL.createObjectURL(blob) + '" alt=""><span class="pbadge">✓</span>';
+    } catch { showToast('Photo illisible, réessayez', 'error'); }
+  };
+  input.click();
+}
+
+function editArmoireFromMap(id) {
+  const arm = state.armoires.find(a => a.id === id);
+  if (arm) { map.closePopup(); showArmoireForm(arm); }
+}
+
+function deleteArmoireFromMap(id) {
+  const arm = state.armoires.find(a => a.id === id);
+  if (!arm) return;
+  if (!confirm('Supprimer définitivement l\'armoire ' + arm.id + ' ?\nLes points lumineux rattachés ne seront pas supprimés.')) return;
+  map.closePopup();
+  state.armoires = state.armoires.filter(a => a.id !== id);
+  ARM_PHOTO_TYPES.forEach(k => DB.del('photos', id + '__' + k).catch(() => {}));
+  saveLocalArmoires();
+  refreshMapMarkers();
+  showToast('Armoire supprimée', 'success');
+}
+
 function renderList() {
   const scroll = document.getElementById('list-scroll');
   document.getElementById('list-sub').textContent = state.points.length + ' points · ' + state.chantier;
