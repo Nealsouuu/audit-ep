@@ -617,6 +617,22 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .lasso-hint{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:750;background:rgba(56,189,248,.16);border:1px solid var(--accent);color:var(--accent);font-size:12px;padding:6px 14px;border-radius:999px;display:none;white-space:nowrap}
 .lasso-hint.show{display:block}
 .leaflet-container.lasso-on{cursor:crosshair}
+.settings-head{padding:calc(env(safe-area-inset-top) + 16px) 18px 12px}
+.settings-title{font-size:22px;font-weight:700;color:var(--text)}
+.settings-sub{font-size:13px;color:#94a3b8;margin-top:4px}
+.settings-body{padding:8px 14px calc(var(--bottom-nav) + 24px);overflow-y:auto;height:calc(100% - 70px)}
+.set-section-title{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);margin:18px 4px 8px;font-weight:600}
+.set-card{background:var(--bg2,#1e293b);border:1px solid var(--border2,#334155);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.set-card-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px}
+.set-tag{font-size:11px;color:#94a3b8;font-weight:400}
+.set-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.set-chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg1,#0f172a);border:1px solid var(--border2,#334155);border-radius:999px;padding:5px 10px;font-size:13px;color:var(--text)}
+.set-chip-x{cursor:pointer;color:#f87171;font-weight:700;font-size:15px;line-height:1}
+.set-empty{font-size:12px;color:#94a3b8}
+.set-add{display:flex;gap:8px;align-items:center}
+.set-input{flex:1;background:var(--bg1,#0f172a);border:1px solid var(--border2,#334155);border-radius:8px;padding:9px 11px;color:var(--text);font-size:14px;width:100%;box-sizing:border-box}
+.set-btn{background:var(--accent);color:#04222e;border:none;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer}
+.set-btn-del{background:transparent;border:1px solid #f87171;color:#f87171}
 </style>
 </head>
 <body>
@@ -926,6 +942,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <div class="form-label">Observations</div>
       <textarea class="form-input" id="f-observations" rows="3" placeholder="Notes libres..."></textarea>
     </div>
+    <div id="custom-fields-pl"></div>
 
   </div>
   <div class="form-actions">
@@ -955,6 +972,17 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 </div>
 
 <!-- ══════════════════════════════════════════
+     ÉCRAN RÉGLAGES
+══════════════════════════════════════════ -->
+<div class="screen" id="screen-settings">
+  <div class="settings-head">
+    <div class="settings-title">Réglages</div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite.</div>
+  </div>
+  <div class="settings-body" id="settings-body"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
      BOTTOM NAV
 ══════════════════════════════════════════ -->
 <div class="bottom-nav" id="bottom-nav" style="display:none">
@@ -973,6 +1001,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   <div class="nav-item" id="nav-panier" onclick="showScreen('panier')">
     <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/><path d="M16 10a4 4 0 01-8 0"/></svg>
     <span class="nav-label">Panier</span>
+  </div>
+  <div class="nav-item" id="nav-settings" onclick="showScreen('settings')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    <span class="nav-label">Réglages</span>
   </div>
 </div>
 
@@ -1589,6 +1621,7 @@ async function doLogin() {
   state.chantier = chantier;
   await loadLocal();
   await loadLocalArmoires();
+  await loadConfig();
   document.getElementById('map-chantier-label').textContent = chantier;
   document.getElementById('map-technicien-label').textContent = state.technicien;
   document.getElementById('bottom-nav').style.display = 'flex';
@@ -1611,6 +1644,7 @@ function showScreen(name) {
   if (name === 'panier') renderPanier();
   if (name === 'map') refreshMapMarkers();
   if (name === 'armoires') renderArmoires();
+  if (name === 'settings') renderSettings();
 }
 function goBack() {
   if (currentScreen === 'form') { showScreen('map'); return; }
@@ -1988,6 +2022,11 @@ function showForm(pt) {
   document.getElementById('f-observations').value = pt ? (pt.observations || '') : '';
   document.getElementById('f-id-armoire').value = pt ? (pt.idArmoire || '') : '';
   document.getElementById('f-classe-precision').value = pt ? (pt.classePrecision || 'C') : 'C';
+  renderCustomFields();
+  (CONFIG.customFields || []).forEach(cf => {
+    const el = document.getElementById('cf-' + cf.key);
+    if (el) el.value = (pt && pt.custom && pt.custom[cf.column] != null) ? pt.custom[cf.column] : '';
+  });
 
   // datalist des armoires déjà saisies
   const dl = document.getElementById('armoire-list');
@@ -2108,6 +2147,7 @@ function getFormData() {
     puissance: document.getElementById('f-puissance').value,
     observations: document.getElementById('f-observations').value,
     dansPanier: state.panierInForm,
+    custom: readCustomFields(),
     photos
   };
 }
@@ -2434,7 +2474,171 @@ function viderPanier() {
 }
 
 // ── MODAL MASSE ──
-const masseOptions = {
+/* ═══════════ CONFIG MODIFIABLE (page Réglages) ═══════════ */
+const CONFIG_DEFAULT = {
+  lists: {
+    typeSupport:   ['Mât droit','Console','Potence','Candélabre','Encastré sol','Façade'],
+    etatSupport:   ['Bon','Moyen','Mauvais','À remplacer'],
+    typeAttache:   ['Bride','Crosse','Platine','Direct'],
+    typeLuminaire: ['Lanterne','Projecteur','Hublot','Borne','Applique','Globe'],
+    etatLuminaire: ['Bon','Moyen','Mauvais','À remplacer'],
+    technologie:   ['LED','Sodium HP','Sodium BP','Iodures métalliques','Fluo compact','Inconnue'],
+  },
+  customFields: []   // { key, label, column, type:'text'|'select', options:[] }
+};
+// Correspondance : clé config → <select> du formulaire → libellé lisible
+const LIST_FIELDS = [
+  { key:'typeSupport',   selectId:'f-type-support',   label:'Types de support' },
+  { key:'etatSupport',   selectId:'f-etat-support',   label:'État du support' },
+  { key:'typeAttache',   selectId:'f-type-attache',   label:"Types d'attache" },
+  { key:'typeLuminaire', selectId:'f-type-luminaire', label:'Types de luminaire' },
+  { key:'etatLuminaire', selectId:'f-etat-luminaire', label:'État luminaires' },
+  { key:'technologie',   selectId:'f-technologie',    label:'Technologie' },
+];
+let CONFIG = JSON.parse(JSON.stringify(CONFIG_DEFAULT));
+
+async function loadConfig() {
+  try {
+    const rec = await DB.get('meta', 'config');
+    if (rec && rec.v) {
+      CONFIG = {
+        lists: Object.assign({}, CONFIG_DEFAULT.lists, rec.v.lists || {}),
+        customFields: Array.isArray(rec.v.customFields) ? rec.v.customFields : []
+      };
+    }
+  } catch (e) {}
+  applyConfig();
+}
+async function saveConfig() {
+  try { await DB.put('meta', { k: 'config', v: CONFIG }); } catch (e) {}
+  applyConfig();
+}
+function fillSelect(sel, options) {
+  if (!sel) return;
+  const val = sel.value;
+  sel.innerHTML = '<option value="">-- Sélectionner --</option>' +
+    (options || []).map(o => `<option${o === val ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('');
+}
+function applyConfig() {
+  // 1) menus du formulaire point lumineux
+  LIST_FIELDS.forEach(f => fillSelect(document.getElementById(f.selectId), CONFIG.lists[f.key]));
+  // 2) édition en masse (mêmes listes)
+  masseOptions = {
+    'f-type-support': CONFIG.lists.typeSupport,
+    'f-type-attache': CONFIG.lists.typeAttache,
+    'f-etat-support': CONFIG.lists.etatSupport,
+    'f-etat-luminaire': CONFIG.lists.etatLuminaire,
+    'f-technologie': CONFIG.lists.technologie,
+    'f-type-luminaire': CONFIG.lists.typeLuminaire,
+    'f-classe-precision': ['C','B','A'],
+  };
+  // 3) champs personnalisés dans le formulaire
+  renderCustomFields();
+}
+// Rend les champs personnalisés dans le formulaire point lumineux
+function renderCustomFields() {
+  const box = document.getElementById('custom-fields-pl');
+  if (!box) return;
+  box.innerHTML = (CONFIG.customFields || []).map(cf => {
+    const id = 'cf-' + cf.key;
+    const col = escapeHtml(cf.column);
+    if (cf.type === 'select') {
+      const opts = '<option value=""></option>' + (cf.options || []).map(o => `<option>${escapeHtml(o)}</option>`).join('');
+      return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><select class="form-select" id="${id}" data-col="${col}">${opts}</select></div>`;
+    }
+    return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><input class="form-input" id="${id}" data-col="${col}"></div>`;
+  }).join('');
+}
+// Lit les valeurs des champs personnalisés → objet { colonne: valeur }
+function readCustomFields() {
+  const out = {};
+  document.querySelectorAll('#custom-fields-pl [data-col]').forEach(el => {
+    out[el.getAttribute('data-col')] = el.value;
+  });
+  return out;
+}
+
+/* ═══════════ PAGE RÉGLAGES : rendu + édition ═══════════ */
+function renderSettings() {
+  const box = document.getElementById('settings-body');
+  if (!box) return;
+  let html = '<div class="set-section-title">Listes de choix</div>';
+  LIST_FIELDS.forEach(f => {
+    const chips = (CONFIG.lists[f.key] || []).map((o, i) =>
+      `<span class="set-chip">${escapeHtml(o)}<span class="set-chip-x" onclick="removeOption('${f.key}',${i})">×</span></span>`
+    ).join('');
+    html += `<div class="set-card">
+      <div class="set-card-title">${escapeHtml(f.label)}</div>
+      <div class="set-chips">${chips || '<span class="set-empty">Aucune option</span>'}</div>
+      <div class="set-add">
+        <input class="set-input" id="addopt-${f.key}" placeholder="Nouvelle option…">
+        <button class="set-btn" onclick="addOption('${f.key}')">Ajouter</button>
+      </div>
+    </div>`;
+  });
+
+  html += '<div class="set-section-title">Champs personnalisés (nouvelles colonnes)</div>';
+  if (!CONFIG.customFields.length) html += '<div class="set-empty" style="padding:0 4px 8px">Aucun champ personnalisé pour le moment.</div>';
+  CONFIG.customFields.forEach((cf, i) => {
+    const meta = cf.type === 'select' ? ('liste : ' + (cf.options || []).join(', ')) : 'texte libre';
+    html += `<div class="set-card">
+      <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ colonne « ${escapeHtml(cf.column)} »</span></div>
+      <div class="set-empty">${escapeHtml(meta)}</div>
+      <div class="set-add"><button class="set-btn set-btn-del" onclick="removeCustomField(${i})">Supprimer ce champ</button></div>
+    </div>`;
+  });
+  html += `<div class="set-card">
+    <div class="set-card-title">+ Ajouter un champ</div>
+    <input class="set-input" id="cf-new-label" placeholder="Nom du champ (ex : Marque du luminaire)" style="margin-bottom:8px">
+    <select class="set-input" id="cf-new-type" onchange="document.getElementById('cf-new-optrow').style.display=this.value==='select'?'flex':'none'" style="margin-bottom:8px">
+      <option value="text">Texte libre</option>
+      <option value="select">Liste de choix</option>
+    </select>
+    <div class="set-add" id="cf-new-optrow" style="display:none;margin-bottom:8px">
+      <input class="set-input" id="cf-new-options" placeholder="Options séparées par des virgules">
+    </div>
+    <button class="set-btn" onclick="addCustomField()">Créer le champ</button>
+  </div>`;
+
+  box.innerHTML = html;
+}
+function addOption(key) {
+  const inp = document.getElementById('addopt-' + key);
+  const v = (inp.value || '').trim();
+  if (!v) return;
+  if (!CONFIG.lists[key]) CONFIG.lists[key] = [];
+  if (!CONFIG.lists[key].includes(v)) CONFIG.lists[key].push(v);
+  saveConfig(); renderSettings();
+}
+function removeOption(key, idx) {
+  CONFIG.lists[key].splice(idx, 1);
+  saveConfig(); renderSettings();
+}
+function slugify(s) {
+  return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || ('champ_' + Date.now());
+}
+function addCustomField() {
+  const label = (document.getElementById('cf-new-label').value || '').trim();
+  if (!label) { showToast('Donne un nom au champ', 'error'); return; }
+  const type = document.getElementById('cf-new-type').value;
+  const options = type === 'select'
+    ? (document.getElementById('cf-new-options').value || '').split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+  const key = slugify(label);
+  if (CONFIG.customFields.some(c => c.key === key || c.column === label)) { showToast('Ce champ existe déjà', 'error'); return; }
+  CONFIG.customFields.push({ key, label, column: label, type, options });
+  saveConfig(); renderSettings();
+  showToast('Champ « ' + label + ' » créé', 'success');
+}
+function removeCustomField(idx) {
+  const cf = CONFIG.customFields[idx];
+  if (!confirm('Retirer le champ « ' + cf.label + ' » du formulaire ?\nLa colonne et les données déjà dans le Sheet ne sont pas supprimées.')) return;
+  CONFIG.customFields.splice(idx, 1);
+  saveConfig(); renderSettings();
+}
+
+let masseOptions = {
   'f-type-support': ['Mât droit','Console','Potence','Candélabre','Encastré sol','Façade'],
   'f-type-attache': ['Bride','Crosse','Platine','Direct'],
   'f-etat-support': ['Bon','Moyen','Mauvais','À remplacer'],
@@ -2585,6 +2789,10 @@ let isSyncing = false;
 
 // ── LIRE les données depuis Apps Script ──
 function mapServerRow(r) {
+  const custom = {};
+  (CONFIG.customFields || []).forEach(cf => {
+    if (r[cf.column] !== undefined) custom[cf.column] = r[cf.column];
+  });
   return {
     id: String(r['ID'] || ''),
     idArmoire: r['ID Armoire'] || '',
@@ -2607,6 +2815,7 @@ function mapServerRow(r) {
     chantier: r['Chantier'] || '',
     technicien: r['Technicien'] || '',
     date: r['Date'] || '',
+    custom: custom,
     photos: {}
   };
 }
@@ -2777,6 +2986,8 @@ async function syncPointToSheets(pt) {
         'Date': pt.date
       }
     };
+    // Champs personnalisés → colonnes (créées automatiquement côté Apps Script)
+    if (pt.custom) Object.assign(payload.data, pt.custom);
     const res = await fetch(SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
