@@ -13,6 +13,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
 <style>
 :root {
   --bg: #0f172a;
@@ -1247,6 +1249,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 /* ════════ SOCLE ROBUSTESSE v4 ════════ */
 const PHOTO_MAX_DIM = 1280;
@@ -1600,7 +1603,7 @@ function goBack() {
 }
 
 // ── MAP ──
-let map, markersLayer, osmLayer, satLayer, ignLayer, baseMode = 0; // 0=Plan, 1=Satellite IGN, 2=Satellite Esri
+let map, markersLayer, pointsCluster, osmLayer, satLayer, ignLayer, baseMode = 0; // 0=Plan, 1=Satellite IGN, 2=Satellite Esri
 function initMap() {
   if (map) return; // évite une double init
   map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 21 }).setView([16.25, -61.55], 11);
@@ -1624,7 +1627,19 @@ function initMap() {
     crossOrigin: true,
     attribution: 'Orthophotos © IGN'
   });
-  markersLayer = L.layerGroup().addTo(map);
+  markersLayer = L.layerGroup().addTo(map);   // armoires : toujours visibles, non regroupées
+  // Points : regroupés en clusters pour rester fluide même avec des milliers de points.
+  // Repli automatique sur un simple calque si le plugin n'est pas chargé (1er lancement hors-ligne).
+  pointsCluster = (typeof L.markerClusterGroup === 'function')
+    ? L.markerClusterGroup({
+        chunkedLoading: true,          // ajoute les marqueurs par lots → pas de gel de l'UI
+        maxClusterRadius: 60,
+        disableClusteringAtZoom: 18,   // au niveau rue, on voit chaque point
+        spiderfyOnMaxZoom: false,
+        removeOutsideVisibleBounds: true
+      })
+    : L.layerGroup();
+  pointsCluster.addTo(map);
   map.on('click', (e) => { if (poseMode && !lassoMode) addPointOnMap(e.latlng); });
   const cont = map.getContainer();
   cont.addEventListener('pointerdown', lassoDown);
@@ -1765,6 +1780,8 @@ function getMarkerColor(pt) {
 function refreshMapMarkers() {
   if (!markersLayer) return;
   markersLayer.clearLayers();
+  if (pointsCluster) pointsCluster.clearLayers();
+  const ptMarkers = [];
   state.points.forEach(pt => {
     if (!pt.lat || !pt.lng) return;
     const color = getMarkerColor(pt);
@@ -1773,7 +1790,7 @@ function refreshMapMarkers() {
       html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>`,
       iconSize: [14,14], iconAnchor: [7,7]
     });
-    const marker = L.marker([pt.lat, pt.lng], { icon }).addTo(markersLayer);
+    const marker = L.marker([pt.lat, pt.lng], { icon });
     marker.bindPopup(`
       <div class="popup-id">${escapeHtml(pt.id)}</div>
       <div class="popup-title">${escapeHtml(pt.typeSupport || 'Point lumineux')}</div>
@@ -1784,7 +1801,13 @@ function refreshMapMarkers() {
         <button class="popup-btn popup-btn-del" onclick="deleteFromMap('${pt.id}')" title="Supprimer">🗑</button>
       </div>
     `, { maxWidth: 240 });
+    ptMarkers.push(marker);
   });
+  // Ajout groupé (bien plus rapide que un par un avec des milliers de points)
+  if (pointsCluster) {
+    if (pointsCluster.addLayers) pointsCluster.addLayers(ptMarkers);
+    else ptMarkers.forEach(m => pointsCluster.addLayer(m));
+  }
   // Marqueurs armoires (carré orange avec éclair)
   state.armoires.forEach(arm => {
     if (!arm.lat || !arm.lng) return;
