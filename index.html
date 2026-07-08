@@ -2199,6 +2199,7 @@ async function savePoint() {
   currentGPSLat = null; currentGPSLng = null; currentGPSAccuracy = null; currentSourcePosition = '';
   saveLocal();
   await syncPointToSheets(data);
+  uploadPendingPhotos();
   refreshMapMarkers();
   updateStatus();
   showToast('Point enregistré ✓', 'success');
