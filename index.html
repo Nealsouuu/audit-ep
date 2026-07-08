@@ -555,6 +555,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   border: none; text-align: center;
 }
 .popup-btn-edit { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent); }
+.popup-btn-move { background: rgba(167,139,250,0.15); color: #a78bfa; border: 1px solid #a78bfa; flex: 0 0 auto; padding: 8px 10px; }
 .popup-btn-dup { background: var(--orange-dim); color: var(--orange); border: 1px solid var(--orange); }
 .popup-btn-del { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); flex: 0 0 auto; padding: 8px 10px; }
 .btn-save-top {
@@ -1619,6 +1620,7 @@ function goBack() {
 
 // ── MAP ──
 let map, markersLayer, pointsCluster, osmLayer, satLayer, ignLayer, baseMode = 0; // 0=Plan, 1=Satellite IGN, 2=Satellite Esri
+const markersById = new Map(); // id point → marqueur Leaflet (pour le déplacement au doigt)
 function initMap() {
   if (map) return; // évite une double init
   map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 21 }).setView([16.25, -61.55], 11);
@@ -1796,6 +1798,7 @@ function refreshMapMarkers() {
   if (!markersLayer) return;
   markersLayer.clearLayers();
   if (pointsCluster) pointsCluster.clearLayers();
+  markersById.clear();
   const ptMarkers = [];
   state.points.forEach(pt => {
     if (!pt.lat || !pt.lng) return;
@@ -1812,10 +1815,12 @@ function refreshMapMarkers() {
       <div style="font-size:12px;color:#94a3b8">${escapeHtml(pt.technologie || '')} ${pt.puissance ? escapeHtml(pt.puissance)+'W' : ''}</div>
       <div class="popup-actions">
         <button class="popup-btn popup-btn-edit" onclick="editFromMap('${pt.id}')">Modifier</button>
+        <button class="popup-btn popup-btn-move" onclick="moveFromMap('${pt.id}')" title="Déplacer sur la carte">✥</button>
         <button class="popup-btn popup-btn-dup" onclick="dupFromMap('${pt.id}')">Dupliquer</button>
         <button class="popup-btn popup-btn-del" onclick="deleteFromMap('${pt.id}')" title="Supprimer">🗑</button>
       </div>
-    `, { maxWidth: 240 });
+    `, { maxWidth: 260 });
+    markersById.set(pt.id, marker);
     ptMarkers.push(marker);
   });
   // Ajout groupé (bien plus rapide que un par un avec des milliers de points)
@@ -1870,6 +1875,50 @@ function deleteFromMap(id) {
   map.closePopup();
   deletePointLocal(id);
 }
+
+// ── Déplacement d'un point directement sur la carte (glisser-déposer du marqueur) ──
+function moveFromMap(id) {
+  map.closePopup();
+  const marker = markersById.get(id);
+  if (!marker) return;
+  // Si le point est encore dans un cluster (carte trop dézoomée), on zoome dessus
+  // d'abord pour l'isoler — sinon impossible de le saisir au doigt précisément.
+  if (pointsCluster && typeof pointsCluster.zoomToShowLayer === 'function' && pointsCluster.getVisibleParent
+      && pointsCluster.getVisibleParent(marker) !== marker) {
+    pointsCluster.zoomToShowLayer(marker, () => enableMarkerDrag(marker, id));
+  } else {
+    enableMarkerDrag(marker, id);
+  }
+}
+
+function enableMarkerDrag(marker, id) {
+  // Icône distincte le temps du déplacement, pour que le technicien voie
+  // clairement quel point est en train d'être repositionné.
+  marker.setIcon(L.divIcon({
+    className: '',
+    html: `<div style="width:20px;height:20px;border-radius:50%;background:#a78bfa;border:3px solid white;box-shadow:0 0 0 6px rgba(167,139,250,.3),0 2px 8px rgba(0,0,0,.5)"></div>`,
+    iconSize: [20, 20], iconAnchor: [10, 10]
+  }));
+  marker.dragging.enable();
+  showToast('Faites glisser le point à sa position, puis relâchez pour valider', '');
+  marker.once('dragend', () => confirmMarkerMove(marker, id));
+}
+
+async function confirmMarkerMove(marker, id) {
+  marker.dragging.disable();
+  const { lat, lng } = marker.getLatLng();
+  const pt = state.points.find(p => p.id === id);
+  if (!pt) { refreshMapMarkers(); return; }
+  pt.lat = lat;
+  pt.lng = lng;
+  pt.sourcePosition = 'Ajustement manuel (carte)';
+  saveLocal();
+  refreshMapMarkers();
+  updateStatus();
+  showToast('Position en cours de sync…', '');
+  await syncPointToSheets(pt);
+}
+
 // Supprime un point localement (et tente la suppression côté serveur).
 // NB : sans confirmation que le script Apps Script gère une action 'delete',
 // la ligne peut rester dans le Sheet — le tombstone local empêche au moins
