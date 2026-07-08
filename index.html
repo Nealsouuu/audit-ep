@@ -759,6 +759,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="map-ctrl-btn" id="lasso-btn" onclick="toggleLasso()" title="Lasso : entourer des points pour les sélectionner">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="9" cy="6.5" rx="6.5" ry="4.5" stroke-dasharray="3 2.5"/><path d="M6 10.5c0 2 .8 4 .8 4"/></svg>
     </div>
+    <div class="map-ctrl-btn" id="pose-armoire-btn" onclick="toggleArmoirePose()" title="Poser une armoire sur la carte">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="2.5" width="13" height="13" rx="2.5"/><path d="M10 4.5L6 9.5h2.3l-1.3 4 5-6H9.3l1.4-3z" fill="#94a3b8" stroke="none"/></svg>
+    </div>
     <div class="map-ctrl-btn" id="sat-btn" onclick="toggleSatellite()" title="Fond de carte : Plan → Satellite IGN → Satellite Esri">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="10" y="10" width="6" height="6" rx="1"/></svg>
     </div>
@@ -1691,7 +1694,10 @@ function initMap() {
       })
     : L.layerGroup();
   pointsCluster.addTo(map);
-  map.on('click', (e) => { if (poseMode && !lassoMode) addPointOnMap(e.latlng); });
+  map.on('click', (e) => {
+    if (armoirePoseMode) { placeArmoireOnMap(e.latlng); return; }
+    if (poseMode && !lassoMode) addPointOnMap(e.latlng);
+  });
   const cont = map.getContainer();
   cont.addEventListener('pointerdown', lassoDown);
   cont.addEventListener('pointermove', lassoMoveHandler, { passive: false });
@@ -1725,7 +1731,7 @@ function toggleSatellite() {
 let poseMode = false;
 function togglePose() {
   poseMode = !poseMode;
-  if (poseMode && lassoMode) toggleLasso();      // modes exclusifs
+  if (poseMode) { if (lassoMode) toggleLasso(); if (armoirePoseMode) toggleArmoirePose(); }  // modes exclusifs
   document.getElementById('pose-btn').classList.toggle('active', poseMode);
   showToast(poseMode ? 'Mode pose : tapez la carte pour poser un point' : 'Mode pose désactivé', '');
 }
@@ -1754,11 +1760,31 @@ function addPointOnMap(latlng) {
   showToast('Point posé — caractérisez-le ensuite', 'success');
 }
 
+/* ════════ Mode Pose Armoire (poser une armoire en touchant la carte) ════════ */
+let armoirePoseMode = false;
+function toggleArmoirePose() {
+  armoirePoseMode = !armoirePoseMode;
+  if (armoirePoseMode) { if (poseMode) togglePose(); if (lassoMode) toggleLasso(); }  // modes exclusifs
+  const btn = document.getElementById('pose-armoire-btn');
+  if (btn) btn.classList.toggle('active', armoirePoseMode);
+  showToast(armoirePoseMode ? 'Tapez la carte pour poser une armoire' : 'Mode armoire désactivé', '');
+}
+function placeArmoireOnMap(latlng) {
+  armoirePoseMode = false;
+  const btn = document.getElementById('pose-armoire-btn');
+  if (btn) btn.classList.remove('active');
+  showArmoireForm(null);                              // ouvre une fiche armoire vierge
+  armGPSLat = latlng.lat; armGPSLng = latlng.lng;     // coordonnées du point tapé sur la carte
+  const el = document.getElementById('arm-gps-display');
+  if (el) { el.textContent = armGPSLat.toFixed(6) + ', ' + armGPSLng.toFixed(6); el.classList.remove('empty'); }
+  showToast('Armoire placée — complétez la fiche', 'success');
+}
+
 /* ════════ Lasso (sélection libre au doigt) ════════ */
 let lassoMode = false, lassoActive = false, lassoPts = [], lassoLine = null;
 function toggleLasso() {
   lassoMode = !lassoMode;
-  if (lassoMode && poseMode) togglePose();        // modes exclusifs
+  if (lassoMode) { if (poseMode) togglePose(); if (armoirePoseMode) toggleArmoirePose(); }  // modes exclusifs
   document.getElementById('lasso-btn').classList.toggle('active', lassoMode);
   document.getElementById('lasso-hint').classList.toggle('show', lassoMode);
   if (map) map.getContainer().classList.toggle('lasso-on', lassoMode);
@@ -1868,10 +1894,10 @@ function refreshMapMarkers() {
     const nbPts = state.points.filter(p => p.idArmoire === arm.id).length;
     const icon = L.divIcon({
       className: '',
-      html: `<div style="width:20px;height:20px;background:#fb923c;border:2px solid white;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="white"><path d="M7 1L3 7h4l-2 4 6-6H7L9 1z"/></svg>
+      html: `<div style="width:22px;height:22px;background:#fb923c;border:2px solid white;border-radius:3px;box-shadow:0 2px 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center">
+        <svg width="13" height="13" viewBox="0 0 12 12" fill="white"><path d="M7 1L3 7h4l-2 4 6-6H7L9 1z"/></svg>
       </div>`,
-      iconSize: [20, 20], iconAnchor: [10, 10]
+      iconSize: [22, 22], iconAnchor: [11, 11]
     });
     const marker = L.marker([arm.lat, arm.lng], { icon, zIndexOffset: 500 }).addTo(markersLayer);
     marker.bindPopup(`
