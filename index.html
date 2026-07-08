@@ -1259,7 +1259,7 @@ const DB = (() => {
   function open() {
     if (_db) return Promise.resolve(_db);
     return new Promise((resolve, reject) => {
-      const r = indexedDB.open('auditEP', 3);
+      const r = indexedDB.open('auditEP', 4);
       r.onupgradeneeded = (e) => {
         const db = e.target.result;
         if (!db.objectStoreNames.contains('points'))     db.createObjectStore('points',     { keyPath: 'id' });
@@ -1267,6 +1267,7 @@ const DB = (() => {
         if (!db.objectStoreNames.contains('queue'))      db.createObjectStore('queue',      { keyPath: 'id' });
         if (!db.objectStoreNames.contains('meta'))       db.createObjectStore('meta',       { keyPath: 'k' });
         if (!db.objectStoreNames.contains('tombstones')) db.createObjectStore('tombstones', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('photoQueue')) db.createObjectStore('photoQueue', { keyPath: 'key' });
         if (!db.objectStoreNames.contains('armoires'))   db.createObjectStore('armoires',   { keyPath: 'id' });
       };
       r.onsuccess = () => { _db = r.result; resolve(_db); };
@@ -1328,6 +1329,7 @@ async function updateStatus() {
   if (!pill || !txt) return;
   let pending = 0;
   try { pending = await DB.count('queue'); } catch (e) {}
+  try { pending += await DB.count('photoQueue'); } catch (e) {}
   pill.classList.toggle('offline', !navigator.onLine);
   pill.classList.toggle('warn', _storageWarn);
   const net = navigator.onLine ? 'En ligne' : 'Hors ligne';
@@ -1406,7 +1408,24 @@ async function exportAll() {
   a.download = 'audit_ep_' + (state.chantier || 'export').replace(/\W+/g, '_') + '_' + new Date().toISOString().slice(0, 10) + '.csv';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  showToast(points.length + ' points exportés', 'success');
+  // Export armoires (2e fichier, si présentes)
+  let arms = [];
+  try { arms = await DB.all('armoires'); } catch (e) { arms = state.armoires || []; }
+  if (arms.length) {
+    const acols = ['id', 'etatExt', 'etatInt', 'abonnement', 'cable', 'departs', 'protection', 'horloge', 'observations', 'lat', 'lng', 'photos', 'chantier', 'technicien', 'date'];
+    const alines = arms.map((r) => acols.map((c) => {
+      let v = r[c];
+      if (c === 'photos' && v && typeof v === 'object') v = ARM_PHOTO_TYPES.filter((t) => v[t]).join(',');
+      return csvCell(v);
+    }).join(';'));
+    const acsv = '\uFEFF' + acols.join(';') + '\n' + alines.join('\n');
+    const ab = document.createElement('a');
+    ab.href = URL.createObjectURL(new Blob([acsv], { type: 'text/csv;charset=utf-8' }));
+    ab.download = 'audit_armoires_' + (state.chantier || 'export').replace(/\W+/g, '_') + '_' + new Date().toISOString().slice(0, 10) + '.csv';
+    ab.click();
+    setTimeout(() => URL.revokeObjectURL(ab.href), 4000);
+  }
+  showToast(points.length + ' points' + (arms.length ? ' + ' + arms.length + ' armoires' : '') + ' exportés', 'success');
 }
 
 /* ---- Export ZIP des photos (store-only, sans dépendance, fonctionne hors réseau) ---- */
@@ -1824,28 +1843,13 @@ async function deletePointLocal(id) {
   try { await DB.del('points', id); } catch (e) {}
   try { await DB.del('queue', id); } catch (e) {}
   try { await DB.put('tombstones', { id, ts: Date.now() }); } catch (e) {}
-  for (const t of PHOTO_TYPES) { try { await DB.del('photos', id + '__' + t); } catch (e) {} }
+  for (const t of PHOTO_TYPES) { try { await DB.del('photos', id + '__' + t); } catch (e) {} try { await DB.del('photoQueue', id + '__' + t); } catch (e) {} }
   refreshMapMarkers();
   renderList();
   renderPanier();
   updateStatus();
-  if (navigator.onLine) {
-    try {
-      const res = await fetch(SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'delete', sheet: 'Points Lumineux', id })
-      });
-      const result = await res.json().catch(() => ({}));
-      if (result && result.error) throw new Error(result.error);
-      showToast('Point supprimé ✓', 'success');
-    } catch (e) {
-      console.warn('Suppression serveur (à vérifier côté script) :', e);
-      showToast('Supprimé localement — vérifier le Sheet', '');
-    }
-  } else {
-    showToast('Supprimé localement — sera tenté au retour réseau', '');
-  }
+  const ok = await sendDeleteToSheets('Points Lumineux', id);
+  showToast(ok ? 'Point supprimé ✓' : 'Supprimé localement — sync au retour réseau', ok ? 'success' : '');
 }
 
 // ── FORM ──
@@ -2027,7 +2031,10 @@ async function savePoint() {
   // Persiste les photos capturées (Blob) en IndexedDB, rattachées à l'ID du point
   try {
     for (const k of PHOTO_TYPES) {
-      if (state.photoBlobs[k]) await savePhotoBlob(data.id, k, state.photoBlobs[k]);
+      if (state.photoBlobs[k]) {
+        await savePhotoBlob(data.id, k, state.photoBlobs[k]);
+        await enqueuePhoto(data.id, k, 'Points Lumineux', PHOTO_COLS[k]);
+      }
     }
   } catch (e) { console.error('photo save', e); showToast('⚠ Échec sauvegarde photo', 'error'); }
   if (editingId) {
@@ -2210,6 +2217,7 @@ async function saveArmoire() {
   for (const k of ARM_PHOTO_TYPES) {
     if (state.armoirePhotoBlobs[k]) {
       await savePhotoBlob(arm.id, k, state.armoirePhotoBlobs[k]).catch(e => console.error('photo armoire', e));
+      await enqueuePhoto(arm.id, k, 'Armoires', ARM_PHOTO_COLS[k]);
     }
   }
 
@@ -2226,6 +2234,8 @@ async function saveArmoire() {
   }
   saveLocalArmoires();
   refreshMapMarkers();
+  await syncArmoireToSheets(arm);
+  uploadPendingPhotos();
   showToast(editingArmoireId ? 'Armoire mise à jour' : 'Armoire enregistrée', 'success');
   showScreen('armoires');
 }
@@ -2273,10 +2283,12 @@ function deleteArmoireFromMap(id) {
   if (!confirm('Supprimer définitivement l\'armoire ' + arm.id + ' ?\nLes points lumineux rattachés ne seront pas supprimés.')) return;
   map.closePopup();
   state.armoires = state.armoires.filter(a => a.id !== id);
-  ARM_PHOTO_TYPES.forEach(k => DB.del('photos', id + '__' + k).catch(() => {}));
+  ARM_PHOTO_TYPES.forEach(k => { DB.del('photos', id + '__' + k).catch(() => {}); DB.del('photoQueue', id + '__' + k).catch(() => {}); });
   saveLocalArmoires();
   refreshMapMarkers();
-  showToast('Armoire supprimée', 'success');
+  sendDeleteToSheets('Armoires', id).then(ok => {
+    showToast(ok ? 'Armoire supprimée ✓' : 'Armoire supprimée — sync au retour réseau', ok ? 'success' : '');
+  });
 }
 
 function renderList() {
@@ -2661,17 +2673,155 @@ async function syncPointToSheets(pt) {
 }
 
 // ── VIDER la file d'attente hors-ligne ──
+/* ════════ HÉBERGEMENT DES PHOTOS (Drive via Apps Script) ════════
+   Chaque photo sauvée localement est mise en file (photoQueue), puis envoyée
+   en base64 au script qui la range dans Drive et écrit l'URL dans la colonne
+   du Sheet. Fonctionne hors-ligne : l'envoi part au retour du réseau. */
+const PHOTO_COLS = { luminaire: 'Photo du Luminaire', mat: 'Photo du mât', classe2: 'Photo du classe 2' };
+const ARM_PHOTO_COLS = { arm_ext: 'Photos Extérieur', arm_int: 'Photos Intérieur', arm_compteur: 'Photo Compteur' };
+
+async function enqueuePhoto(ownerId, type, sheet, column) {
+  try {
+    await DB.put('photoQueue', { key: ownerId + '__' + type, ownerId, type, sheet, column, ts: Date.now() });
+  } catch (e) { console.error('enqueuePhoto', e); }
+}
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1]);
+    fr.onerror = () => reject(new Error('read failed'));
+    fr.readAsDataURL(blob);
+  });
+}
+let isUploadingPhotos = false;
+async function uploadPendingPhotos() {
+  if (isUploadingPhotos || !navigator.onLine) return;
+  isUploadingPhotos = true;
+  try {
+    let items = [];
+    try { items = await DB.all('photoQueue'); } catch (e) {}
+    for (const it of items) {
+      if (!navigator.onLine) break;
+      let rec = null;
+      try { rec = await DB.get('photos', it.key); } catch (e) {}
+      if (!rec || !rec.blob) { try { await DB.del('photoQueue', it.key); } catch (e) {} continue; }
+      try {
+        const b64 = await blobToBase64(rec.blob);
+        const res = await fetch(SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({
+            action: 'photo',
+            sheet: it.sheet,
+            id: it.ownerId,
+            column: it.column,
+            filename: it.ownerId + '__' + it.type + '.jpg',
+            mime: 'image/jpeg',
+            chantier: state.chantier || '',
+            data: b64
+          })
+        });
+        const result = await res.json();
+        if (result.error) throw new Error(result.error);
+        await DB.del('photoQueue', it.key);
+      } catch (e) {
+        console.warn('upload photo différé:', e);
+        break; // on retentera au prochain passage
+      }
+    }
+  } finally { isUploadingPhotos = false; }
+}
+
+// ── Suppression côté serveur (avec file hors-ligne) ──
+async function sendDeleteToSheets(sheet, targetId) {
+  const qid = 'del__' + sheet + '__' + targetId;
+  if (!navigator.onLine) {
+    try { await DB.put('queue', { id: qid, kind: 'del', sheet, targetId, ts: Date.now() }); } catch (e) {}
+    updateStatus();
+    return false;
+  }
+  try {
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'delete', sheet, id: targetId })
+    });
+    const result = await res.json().catch(() => ({}));
+    if (result && result.error) throw new Error(result.error);
+    try { await DB.del('queue', qid); } catch (e) {}
+    return true;
+  } catch (e) {
+    console.warn('delete serveur différé:', e);
+    try { await DB.put('queue', { id: qid, kind: 'del', sheet, targetId, ts: Date.now() }); } catch (e2) {}
+    updateStatus();
+    if (navigator.onLine) scheduleSyncRetry();
+    return false;
+  }
+}
+
+// ── SYNC ARMOIRE vers l'onglet "Armoires" du Sheet ──
+async function syncArmoireToSheets(arm) {
+  const qid = 'arm__' + arm.id;
+  const enq = async () => { try { await DB.put('queue', { id: qid, kind: 'armoire', pt: arm, ts: Date.now() }); } catch (e) {} };
+  if (!navigator.onLine) { await enq(); updateStatus(); return; }
+  try {
+    const coordsGPS = arm.lat && arm.lng ? Number(arm.lat).toFixed(6) + ', ' + Number(arm.lng).toFixed(6) : '';
+    const payload = {
+      action: 'upsert',
+      sheet: 'Armoires',
+      id: arm.id,
+      data: {
+        'ID': arm.id,
+        "État Ext de l'armoire": arm.etatExt || '',
+        "État Int de l'armoire": arm.etatInt || '',
+        'Abonnement (kVA)': arm.abonnement || '',
+        "Câble d'alimentation": arm.cable || '',
+        'Départs': arm.departs || '',
+        'Protection': arm.protection || '',
+        'Horloge': arm.horloge || '',
+        'Observations': arm.observations || '',
+        'Longitude': arm.lng || '',
+        'Latitude': arm.lat || '',
+        'Coordonnees_GPS': coordsGPS,
+        'Photos': ARM_PHOTO_TYPES.filter(t => arm.photos && arm.photos[t]).join(','),
+        'Chantier': arm.chantier || '',
+        'Technicien': arm.technicien || '',
+        'Date': arm.date || ''
+      }
+    };
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(payload)
+    });
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+    try { await DB.del('queue', qid); } catch (e) {}
+    resetSyncBackoff();
+    updateStatus();
+  } catch (e) {
+    console.error('Sync armoire:', e);
+    await enq();
+    showToast('Armoire sauvée local — sync au retour réseau', '');
+    updateStatus();
+    if (navigator.onLine) scheduleSyncRetry();
+  }
+}
+
 async function flushSyncQueue() {
   if (isSyncing || !navigator.onLine) return;
   isSyncing = true;
   let items = [];
   try { items = await DB.all('queue'); } catch (e) {}
-  if (items.length) showToast('Synchronisation ' + items.length + ' points…');
+  if (items.length) showToast('Synchronisation ' + items.length + ' éléments…');
   for (const it of items) {
     if (!navigator.onLine) break;
-    await syncPointToSheets(it.pt);   // supprime de la file si succès
+    if (it.kind === 'del') await sendDeleteToSheets(it.sheet, it.targetId);
+    else if (it.kind === 'armoire') await syncArmoireToSheets(it.pt);
+    else await syncPointToSheets(it.pt);   // supprime de la file si succès
   }
   isSyncing = false;
+  uploadPendingPhotos();                    // draine aussi la file des photos
   updateStatus();
 }
 window.addEventListener('online', () => { resetSyncBackoff(); flushSyncQueue(); });
