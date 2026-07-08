@@ -2575,6 +2575,8 @@ async function loadFromSheets(silent) {
       const byId = new Map(state.points.map(p => [String(p.id), p]));
       let tombstones = new Set();
       try { tombstones = new Set((await DB.all('tombstones')).map(t => t.id)); } catch (e) {}
+      let pendingIds = new Set();
+      try { pendingIds = new Set((await DB.all('queue')).map(q => String(q.id))); } catch (e) {}
 
       // 1) Ajouts : points du serveur absents en local (hors supprimés/tombstones)
       let added = 0;
@@ -2585,13 +2587,28 @@ async function loadFromSheets(silent) {
         added++;
       });
 
+      // 1bis) Mises à jour : points déjà connus en local dont les champs (coordonnées
+      //       GPS incluses) ont changé côté Sheet — ex. correction en masse dans Excel.
+      //       Garde-fou : on ne touche JAMAIS un point qui a une modif locale en attente
+      //       de sync (queue), pour ne pas écraser une saisie terrain pas encore remontée.
+      let updated = 0;
+      (data.rows || []).forEach(r => {
+        const id = String(r['ID'] || '');
+        if (!id || tombstones.has(id) || pendingIds.has(id)) return;
+        const existing = byId.get(id);
+        if (!existing) return; // pas encore en local → déjà géré par l'ajout ci-dessus
+        const fresh = mapServerRow(r);
+        fresh.photos = existing.photos; // indicateurs photos gérés en local (IndexedDB), pas dans le Sheet
+        const changed = fresh.lat !== existing.lat || fresh.lng !== existing.lng
+          || JSON.stringify(fresh) !== JSON.stringify(Object.assign({}, existing, { photos: fresh.photos }));
+        if (changed) { byId.set(id, fresh); updated++; }
+      });
+
       // 2) Réconciliation descendante : retirer en local les points de CE chantier
       //    disparus du Sheet. Garde-fous : JAMAIS un point en attente de sync (posé
       //    hors-ligne, pas encore remonté) ni un point d'un autre chantier. Ne s'exécute
       //    que si le serveur a répondu correctement → aucune coupure réseau ne peut effacer.
       const serverIds = new Set((data.rows || []).map(r => String(r['ID'] || '')));
-      let pendingIds = new Set();
-      try { pendingIds = new Set((await DB.all('queue')).map(q => String(q.id))); } catch (e) {}
       let removed = 0;
       for (const p of [...byId.values()]) {
         const pid = String(p.id);
@@ -2607,7 +2624,13 @@ async function loadFromSheets(silent) {
       refreshMapMarkers();
 
       if (removed) showToast(removed + ' point' + (removed > 1 ? 's' : '') + ' retiré' + (removed > 1 ? 's' : '') + ' (supprimé du Sheet)', '');
-      else if (!silent) showToast(added ? (added + ' point' + (added > 1 ? 's' : '') + ' ajouté' + (added > 1 ? 's' : '') + ' ✓') : 'À jour ✓', 'success');
+      else if (added || updated) {
+        const parts = [];
+        if (added) parts.push(added + ' ajouté' + (added > 1 ? 's' : ''));
+        if (updated) parts.push(updated + ' mis à jour');
+        showToast(parts.join(' · ') + ' ✓', 'success');
+      }
+      else if (!silent) showToast('À jour ✓', 'success');
     } catch (e) {
       console.error('Load error:', e);
       if (!silent) showToast('Mode hors-ligne', '');
