@@ -571,11 +571,17 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 }
 .btn-save-top:active { opacity: 0.8; }
 /* ─── v4 : robustesse terrain ─────────────────────────────── */
-.status-pill{position:fixed;top:calc(env(safe-area-inset-top) + 8px);right:10px;z-index:1200;display:flex;align-items:center;gap:6px;background:rgba(15,23,42,.82);backdrop-filter:blur(8px);border:1px solid var(--border2);border-radius:999px;padding:5px 10px;font-family:var(--font-mono);font-size:11px;color:var(--text2);cursor:pointer}
+.topbar-actions{position:fixed;top:calc(env(safe-area-inset-top) + 8px);right:10px;z-index:1200;display:flex;align-items:center;gap:8px}
+.status-pill{display:flex;align-items:center;gap:6px;background:rgba(15,23,42,.82);backdrop-filter:blur(8px);border:1px solid var(--border2);border-radius:999px;padding:5px 10px;font-family:var(--font-mono);font-size:11px;color:var(--text2);cursor:pointer}
 .status-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--green);flex:none}
 .status-pill.offline .dot{background:var(--orange)}
 .status-pill.warn .dot{background:var(--red)}
 .status-pill .pend{color:var(--accent)}
+.sync-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;background:rgba(15,23,42,.82);backdrop-filter:blur(8px);border:1px solid var(--border2);border-radius:50%;color:var(--text2);cursor:pointer;padding:0}
+.sync-btn:active{opacity:.8}
+.sync-btn:disabled{opacity:.45;pointer-events:none}
+.sync-btn.spinning svg{animation:sync-spin .8s linear infinite}
+@keyframes sync-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .precision-row{display:flex;gap:8px;align-items:center;margin-top:8px}
 .precision-row .form-select{flex:1;margin:0}
 .acc-tag{font-family:var(--font-mono);font-size:11px;color:var(--text3);white-space:nowrap}
@@ -623,9 +629,18 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   Mode hors-ligne — données sauvegardées localement
 </div>
 
-<!-- BARRE D'ÉTAT (online/offline + sync en attente) -->
-<div class="status-pill" id="status-pill" onclick="openDiag()" title="État & diagnostic">
-  <span class="dot"></span><span id="status-text">…</span>
+<!-- BARRE D'ÉTAT (online/offline + sync en attente) + bouton sync manuel -->
+<div class="topbar-actions">
+  <button class="sync-btn" id="sync-btn" onclick="manualSync()" title="Synchroniser avec le Sheet" type="button">
+    <svg id="sync-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="23 4 23 10 17 10"></polyline>
+      <polyline points="1 20 1 14 7 14"></polyline>
+      <path d="M3.51 9a9 9 0 0114.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0020.49 15"></path>
+    </svg>
+  </button>
+  <div class="status-pill" id="status-pill" onclick="openDiag()" title="État & diagnostic">
+    <span class="dot"></span><span id="status-text">…</span>
+  </div>
 </div>
 
 <!-- PANNEAU DIAGNOSTIC -->
@@ -2556,6 +2571,21 @@ function startPolling() {
 }
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+// ── Bouton "Synchroniser" du bandeau : force un aller-retour immédiat avec le Sheet ──
+async function manualSync() {
+  const btn = document.getElementById('sync-btn');
+  if (btn.classList.contains('spinning')) return; // déjà en cours
+  if (!navigator.onLine) { showToast('Hors ligne — synchronisation impossible pour le moment', ''); return; }
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  try {
+    await loadFromSheets(false);
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
 }
 
 async function loadFromSheets(silent) {
