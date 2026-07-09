@@ -1582,14 +1582,23 @@ function escapeHtml(v) {
 }
 
 // ── STOCKAGE LOCAL (IndexedDB) ──
-function saveLocal() {
+let _saveTimer = null;
+function _saveLocalNow() {
+  _saveTimer = null;
   // persistance durable en arrière-plan ; toute erreur est rendue VISIBLE
-  // (plus de try/catch muet qui masquait la perte de données)
   DB.putAllPoints(state.points)
     .then(() => { if (_storageWarn) setStorageWarn(false); })
     .catch((e) => { console.error('Stockage:', e); setStorageWarn(true); showToast('⚠ Échec stockage local — vérifiez l\'espace', 'error'); });
   migrateLegacyLocalStorage();
 }
+function saveLocal() {
+  // Débounce 400 ms : regroupe les écritures rapprochées (édition en masse, lasso…)
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(_saveLocalNow, 400);
+}
+// Filet : si l'app passe en arrière-plan, on écrit immédiatement ce qui est en attente
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && _saveTimer) _saveLocalNow(); });
+window.addEventListener('pagehide', () => { if (_saveTimer) _saveLocalNow(); });
 async function loadLocal() {
   try {
     const pts = await DB.all('points');
@@ -1656,7 +1665,7 @@ function showScreen(name) {
   currentScreen = name;
   if (name === 'list') renderList();
   if (name === 'panier') renderPanier();
-  if (name === 'map') refreshMapMarkers();
+  if (name === 'map') refreshMapMarkers();   // couvre aussi le rendu différé (mapDirty)
   if (name === 'armoires') renderArmoires();
   if (name === 'settings') renderSettings();
 }
@@ -1866,6 +1875,7 @@ function getMarkerColor(pt) {
 }
 
 // \u2500\u2500 Filtre de la carte par armoire \u2500\u2500
+let _filterSig = '';
 function populateArmoireFilter() {
   const sel = document.getElementById('map-filter');
   if (!sel) return;
@@ -1873,6 +1883,9 @@ function populateArmoireFilter() {
   state.armoires.forEach(a => { if (a.id) ids.add(String(a.id)); });
   state.points.forEach(p => { if (p.idArmoire) ids.add(String(p.idArmoire)); });
   const sorted = [...ids].sort();
+  const sig = sorted.join('|') + '§' + (state.filterArmoire || '');
+  if (sig === _filterSig) return;        // rien n'a changé → on ne touche pas au DOM
+  _filterSig = sig;
   const cur = state.filterArmoire || '';
   if (cur && !ids.has(cur)) state.filterArmoire = '';
   sel.innerHTML = '<option value="">Toutes les armoires</option>' +
@@ -1893,7 +1906,10 @@ function setArmoireFilter(v) {
   showToast(pts.length + ' point' + (pts.length > 1 ? 's' : '') + ' sur cette armoire', '');
 }
 
+let mapDirty = false;
 function refreshMapMarkers() {
+  if (currentScreen !== 'map') { mapDirty = true; return; }   // reconstruit au retour sur la carte
+  mapDirty = false;
   if (!markersLayer) return;
   markersLayer.clearLayers();
   if (pointsCluster) pointsCluster.clearLayers();
@@ -2535,7 +2551,11 @@ function renderList() {
     scroll.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#94a3b8" stroke-width="1.5"><circle cx="24" cy="24" r="20"/><path d="M24 14v10l6 6"/></svg></div><div class="empty-text">Aucun point relevé<br>sur ce chantier</div></div>`;
     return;
   }
-  scroll.innerHTML = state.points.map(pt => `
+  const LIST_PAGE = 300;
+  if (!window._listLimit) window._listLimit = LIST_PAGE;
+  const visible = state.points.slice(0, window._listLimit);
+  const rest = state.points.length - visible.length;
+  scroll.innerHTML = visible.map(pt => `
     <div class="list-item" onclick="showForm(state.points.find(p=>p.id==='${pt.id}'))">
       <div class="list-item-dot" style="background:${getMarkerColor(pt)}"></div>
       <div class="list-item-info">
@@ -2546,7 +2566,7 @@ function renderList() {
       ${pt.dansPanier ? '<div class="panier-badge">Panier</div>' : ''}
       <div class="list-item-arrow">›</div>
     </div>
-  `).join('');
+  `).join('') + (rest > 0 ? `<button class="set-btn" style="display:block;margin:14px auto 20px" onclick="window._listLimit += 500; renderList()">Afficher plus (${rest} restants)</button>` : '');
 }
 
 // ── PANIER ──
@@ -3084,8 +3104,10 @@ async function loadFromSheets(silent) {
   if (isLoading) return;                 // évite les chargements qui se chevauchent
   isLoading = true;
   try {
-    await loadLocal();                   // points locaux d'abord = source de vérité hors-ligne
-    refreshMapMarkers();
+    if (!silent) {                       // au polling silencieux, la mémoire est déjà la source de vérité
+      await loadLocal();                 // points locaux d'abord = source de vérité hors-ligne
+      refreshMapMarkers();
+    }
     if (!navigator.onLine) return;
     try {
       if (!silent) showToast('Synchronisation serveur…');
@@ -3141,9 +3163,11 @@ async function loadFromSheets(silent) {
         }
       }
 
-      state.points = [...byId.values()];
-      saveLocal();
-      refreshMapMarkers();
+      if (added || updated || removed) {   // rien à faire si le serveur n'a rien de neuf
+        state.points = [...byId.values()];
+        saveLocal();
+        refreshMapMarkers();
+      }
 
       if (removed) showToast(removed + ' point' + (removed > 1 ? 's' : '') + ' retiré' + (removed > 1 ? 's' : '') + ' (supprimé du Sheet)', '');
       else if (added || updated) {
