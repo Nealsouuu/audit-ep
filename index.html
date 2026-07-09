@@ -633,6 +633,12 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .set-input{flex:1;background:var(--bg1,#0f172a);border:1px solid var(--border2,#334155);border-radius:8px;padding:9px 11px;color:var(--text);font-size:14px;width:100%;box-sizing:border-box}
 .set-btn{background:var(--accent);color:#04222e;border:none;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer}
 .set-btn-del{background:transparent;border:1px solid #f87171;color:#f87171}
+.set-color-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-top:1px solid var(--border2,#334155)}
+.set-color-row:first-child{border-top:none}
+.set-color-label{font-size:13px;color:var(--text)}
+.set-color{width:46px;height:30px;border:none;background:none;padding:0;cursor:pointer}
+.map-filter{position:absolute;top:calc(env(safe-area-inset-top) + 64px);left:10px;z-index:800;max-width:58%;background:rgba(15,23,42,.9);backdrop-filter:blur(8px);color:var(--text);border:1px solid var(--border2);border-radius:999px;padding:8px 12px;font-size:13px;-webkit-appearance:none;appearance:none}
+.map-filter.active{border-color:var(--accent);color:var(--accent)}
 </style>
 </head>
 <body>
@@ -743,6 +749,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
   </div>
   <div id="map"></div>
+  <select class="map-filter" id="map-filter" onchange="setArmoireFilter(this.value)">
+    <option value="">Toutes les armoires</option>
+  </select>
   <div class="map-controls">
     <div class="map-ctrl-btn" onclick="map.zoomIn()">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round"><path d="M9 4v10M4 9h10"/></svg>
@@ -1127,6 +1136,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="form-row">
       <textarea class="form-input" id="af-observations" rows="3" placeholder="Notes libres..."></textarea>
     </div>
+    <div id="custom-fields-arm"></div>
 
   </div>
   <div class="form-actions">
@@ -1534,6 +1544,7 @@ let state = {
   chantier: '',
   points: [],
   armoires: [],
+  filterArmoire: '',
   currentPoint: null,
   previousScreen: 'map',
   panierInForm: false,
@@ -1658,6 +1669,7 @@ function goBack() {
 // ── MAP ──
 let map, markersLayer, pointsCluster, osmLayer, satLayer, ignLayer, baseMode = 0; // 0=Plan, 1=Satellite IGN, 2=Satellite Esri
 const markersById = new Map(); // id point → marqueur Leaflet (pour le déplacement au doigt)
+const armoireMarkersById = new Map(); // id armoire → marqueur Leaflet
 function initMap() {
   if (map) return; // évite une double init
   map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 21 }).setView([16.25, -61.55], 11);
@@ -1847,11 +1859,38 @@ function finishLasso() {
 
 function getMarkerColor(pt) {
   if (pt.dansPanier) return '#fb923c';
+  const colors = (CONFIG && CONFIG.colors) || {};
   const etat = pt.etatSupport || '';
-  if (etat === 'Bon') return '#4ade80';
-  if (etat === 'Moyen') return '#facc15';
-  if (etat === 'Mauvais' || etat === 'À remplacer') return '#f87171';
-  return '#38bdf8';
+  if (etat && colors[etat]) return colors[etat];
+  return colors._default || '#38bdf8';
+}
+
+// \u2500\u2500 Filtre de la carte par armoire \u2500\u2500
+function populateArmoireFilter() {
+  const sel = document.getElementById('map-filter');
+  if (!sel) return;
+  const ids = new Set();
+  state.armoires.forEach(a => { if (a.id) ids.add(String(a.id)); });
+  state.points.forEach(p => { if (p.idArmoire) ids.add(String(p.idArmoire)); });
+  const sorted = [...ids].sort();
+  const cur = state.filterArmoire || '';
+  if (cur && !ids.has(cur)) state.filterArmoire = '';
+  sel.innerHTML = '<option value="">Toutes les armoires</option>' +
+    sorted.map(id => `<option value="${escapeHtml(id)}"${id === state.filterArmoire ? ' selected' : ''}>${escapeHtml(id)}</option>`).join('');
+  sel.value = state.filterArmoire || '';
+  sel.classList.toggle('active', !!state.filterArmoire);
+}
+function setArmoireFilter(v) {
+  state.filterArmoire = v || '';
+  refreshMapMarkers();
+  if (!state.filterArmoire) return;
+  const pts = state.points.filter(p => String(p.idArmoire) === state.filterArmoire && p.lat && p.lng);
+  const arm = state.armoires.find(a => String(a.id) === state.filterArmoire);
+  const latlngs = pts.map(p => [p.lat, p.lng]);
+  if (arm && arm.lat && arm.lng) latlngs.push([arm.lat, arm.lng]);
+  if (latlngs.length === 1) map.setView(latlngs[0], 18);
+  else if (latlngs.length > 1) map.fitBounds(latlngs, { padding: [50, 50], maxZoom: 19 });
+  showToast(pts.length + ' point' + (pts.length > 1 ? 's' : '') + ' sur cette armoire', '');
 }
 
 function refreshMapMarkers() {
@@ -1859,9 +1898,12 @@ function refreshMapMarkers() {
   markersLayer.clearLayers();
   if (pointsCluster) pointsCluster.clearLayers();
   markersById.clear();
+  armoireMarkersById.clear();
+  populateArmoireFilter();
   const ptMarkers = [];
   state.points.forEach(pt => {
     if (!pt.lat || !pt.lng) return;
+    if (state.filterArmoire && String(pt.idArmoire) !== state.filterArmoire) return;
     const color = getMarkerColor(pt);
     const icon = L.divIcon({
       className: '',
@@ -1876,7 +1918,6 @@ function refreshMapMarkers() {
       <div class="popup-actions">
         <button class="popup-btn popup-btn-edit" onclick="editFromMap('${pt.id}')">Modifier</button>
         <button class="popup-btn popup-btn-move" onclick="moveFromMap('${pt.id}')" title="Déplacer sur la carte">✥</button>
-        <button class="popup-btn popup-btn-dup" onclick="dupFromMap('${pt.id}')">Dupliquer</button>
         <button class="popup-btn popup-btn-del" onclick="deleteFromMap('${pt.id}')" title="Supprimer">🗑</button>
       </div>
     `, { maxWidth: 260 });
@@ -1891,6 +1932,7 @@ function refreshMapMarkers() {
   // Marqueurs armoires (carré orange avec éclair)
   state.armoires.forEach(arm => {
     if (!arm.lat || !arm.lng) return;
+    if (state.filterArmoire && String(arm.id) !== state.filterArmoire) return;
     const nbPts = state.points.filter(p => p.idArmoire === arm.id).length;
     const icon = L.divIcon({
       className: '',
@@ -1900,17 +1942,22 @@ function refreshMapMarkers() {
       iconSize: [22, 22], iconAnchor: [11, 11]
     });
     const marker = L.marker([arm.lat, arm.lng], { icon, zIndexOffset: 500 }).addTo(markersLayer);
+    armoireMarkersById.set(arm.id, marker);
     marker.bindPopup(`
       <div class="popup-id" style="color:#fb923c">${escapeHtml(arm.id)}</div>
       <div class="popup-title">Armoire électrique</div>
       <div style="font-size:12px;color:#94a3b8">${nbPts} point${nbPts > 1 ? 's' : ''} rattaché${nbPts > 1 ? 's' : ''}</div>
       <div class="popup-actions">
         <button class="popup-btn popup-btn-edit" onclick="editArmoireFromMap('${arm.id}')">Modifier</button>
+        <button class="popup-btn popup-btn-move" onclick="moveArmoireFromMap('${arm.id}')" title="Déplacer sur la carte">✥</button>
         <button class="popup-btn popup-btn-del" onclick="deleteArmoireFromMap('${arm.id}')" title="Supprimer">🗑</button>
       </div>
     `, { maxWidth: 240 });
   });
-  document.getElementById('map-count-badge').textContent = state.points.length + ' pts';
+  const shown = state.filterArmoire
+    ? state.points.filter(p => String(p.idArmoire) === state.filterArmoire && p.lat && p.lng).length
+    : state.points.length;
+  document.getElementById('map-count-badge').textContent = state.filterArmoire ? (shown + ' pts (filtr\u00e9)') : (shown + ' pts');
 }
 
 function centerOnMe() {
@@ -1977,6 +2024,36 @@ async function confirmMarkerMove(marker, id) {
   updateStatus();
   showToast('Position en cours de sync…', '');
   await syncPointToSheets(pt);
+}
+
+// ── Déplacement d'une armoire directement sur la carte ──
+function moveArmoireFromMap(id) {
+  map.closePopup();
+  const marker = armoireMarkersById.get(id);
+  if (marker) enableArmoireMarkerDrag(marker, id);
+}
+function enableArmoireMarkerDrag(marker, id) {
+  marker.setIcon(L.divIcon({
+    className: '',
+    html: `<div style="width:24px;height:24px;border-radius:4px;background:#a78bfa;border:3px solid white;box-shadow:0 0 0 6px rgba(167,139,250,.3),0 2px 8px rgba(0,0,0,.5)"></div>`,
+    iconSize: [24, 24], iconAnchor: [12, 12]
+  }));
+  marker.dragging.enable();
+  showToast('Glissez l\u2019armoire \u00e0 sa position, puis rel\u00e2chez pour valider', '');
+  marker.once('dragend', () => confirmArmoireMove(marker, id));
+}
+async function confirmArmoireMove(marker, id) {
+  marker.dragging.disable();
+  const { lat, lng } = marker.getLatLng();
+  const arm = state.armoires.find(a => a.id === id);
+  if (!arm) { refreshMapMarkers(); return; }
+  arm.lat = lat;
+  arm.lng = lng;
+  saveLocalArmoires();
+  refreshMapMarkers();
+  updateStatus();
+  showToast('Position armoire en cours de sync\u2026', '');
+  await syncArmoireToSheets(arm);
 }
 
 // Supprime un point localement (et tente la suppression côté serveur).
@@ -2316,6 +2393,11 @@ function showArmoireForm(arm) {
   document.getElementById('af-protection').value = arm ? (arm.protection || '') : '';
   document.getElementById('af-horloge').value = arm ? (arm.horloge || '') : '';
   document.getElementById('af-observations').value = arm ? (arm.observations || '') : '';
+  renderArmCustomFields();
+  (CONFIG.armCustomFields || []).forEach(cf => {
+    const el = document.getElementById('acf-' + cf.key);
+    if (el) el.value = (arm && arm.custom && arm.custom[cf.column] != null) ? arm.custom[cf.column] : '';
+  });
 
   const gpsEl = document.getElementById('arm-gps-display');
   if (arm && arm.lat) {
@@ -2364,6 +2446,7 @@ async function saveArmoire() {
     protection: document.getElementById('af-protection').value,
     horloge: document.getElementById('af-horloge').value,
     observations: document.getElementById('af-observations').value,
+    custom: readArmCustomFields(),
     photos
   };
 
@@ -2510,8 +2593,18 @@ const CONFIG_DEFAULT = {
     typeLuminaire: ['Lanterne','Projecteur','Hublot','Borne','Applique','Globe'],
     etatLuminaire: ['Bon','Moyen','Mauvais','À remplacer'],
     technologie:   ['LED','Sodium HP','Sodium BP','Iodures métalliques','Fluo compact','Inconnue'],
+    armEtatExt:    ['Bon','Moyen','Mauvais','À remplacer'],
+    armEtatInt:    ['Bon','Moyen','Mauvais','À remplacer'],
+    armCable:      ['Aérien','Souterrain','Mixte'],
+    armProtection: ['Disjoncteur','Fusible','Interrupteur différentiel','Autre'],
+    armHorloge:    ['Horloge astronomique','Télégestion','Cellule photoélectrique','Manuel','Aucun'],
   },
-  customFields: []   // { key, label, column, type:'text'|'select', options:[] }
+  customFields: [
+    { key: 'solaire', label: 'Solaire', column: 'Solaire', type: 'select',
+      options: ['Solaire faisable', 'Solaire infaisable', 'Solaire à projeter'] }
+  ],
+  armCustomFields: [],  // champs personnalisés des armoires (onglet Armoires)
+  colors: { 'Bon': '#4ade80', 'Moyen': '#facc15', 'Mauvais': '#f87171', 'À remplacer': '#f87171', '_default': '#38bdf8' }
 };
 // Correspondance : clé config → <select> du formulaire → libellé lisible
 const LIST_FIELDS = [
@@ -2522,6 +2615,13 @@ const LIST_FIELDS = [
   { key:'etatLuminaire', selectId:'f-etat-luminaire', label:'État luminaires' },
   { key:'technologie',   selectId:'f-technologie',    label:'Technologie' },
 ];
+const ARM_LIST_FIELDS = [
+  { key:'armEtatExt',    selectId:'af-etat-ext',   label:'Armoire — État extérieur' },
+  { key:'armEtatInt',    selectId:'af-etat-int',   label:'Armoire — État intérieur' },
+  { key:'armCable',      selectId:'af-cable',      label:"Armoire — Câble d'alimentation" },
+  { key:'armProtection', selectId:'af-protection', label:'Armoire — Protection' },
+  { key:'armHorloge',    selectId:'af-horloge',    label:'Armoire — Horloge / Télégestion' },
+];
 let CONFIG = JSON.parse(JSON.stringify(CONFIG_DEFAULT));
 
 async function loadConfig() {
@@ -2530,10 +2630,18 @@ async function loadConfig() {
     if (rec && rec.v) {
       CONFIG = {
         lists: Object.assign({}, CONFIG_DEFAULT.lists, rec.v.lists || {}),
-        customFields: Array.isArray(rec.v.customFields) ? rec.v.customFields : []
+        customFields: Array.isArray(rec.v.customFields) ? rec.v.customFields : [],
+        armCustomFields: Array.isArray(rec.v.armCustomFields) ? rec.v.armCustomFields : [],
+        colors: Object.assign({}, CONFIG_DEFAULT.colors, rec.v.colors || {})
       };
     }
   } catch (e) {}
+  // Garantit la présence des champs personnalisés fournis par défaut (ex : Solaire)
+  (CONFIG_DEFAULT.customFields || []).forEach(def => {
+    if (!CONFIG.customFields.some(c => c.key === def.key)) CONFIG.customFields.push(def);
+  });
+  if (!Array.isArray(CONFIG.armCustomFields)) CONFIG.armCustomFields = [];
+  if (!CONFIG.colors) CONFIG.colors = Object.assign({}, CONFIG_DEFAULT.colors);
   applyConfig();
 }
 async function saveConfig() {
@@ -2559,8 +2667,11 @@ function applyConfig() {
     'f-type-luminaire': CONFIG.lists.typeLuminaire,
     'f-classe-precision': ['C','B','A'],
   };
-  // 3) champs personnalisés dans le formulaire
+  // 3) menus du formulaire armoire
+  ARM_LIST_FIELDS.forEach(f => fillSelect(document.getElementById(f.selectId), CONFIG.lists[f.key]));
+  // 4) champs personnalisés (points + armoires)
   renderCustomFields();
+  renderArmCustomFields();
 }
 // Rend les champs personnalisés dans le formulaire point lumineux
 function renderCustomFields() {
@@ -2580,6 +2691,26 @@ function renderCustomFields() {
 function readCustomFields() {
   const out = {};
   document.querySelectorAll('#custom-fields-pl [data-col]').forEach(el => {
+    out[el.getAttribute('data-col')] = el.value;
+  });
+  return out;
+}
+function renderArmCustomFields() {
+  const box = document.getElementById('custom-fields-arm');
+  if (!box) return;
+  box.innerHTML = (CONFIG.armCustomFields || []).map(cf => {
+    const id = 'acf-' + cf.key;
+    const col = escapeHtml(cf.column);
+    if (cf.type === 'select') {
+      const opts = '<option value=""></option>' + (cf.options || []).map(o => `<option>${escapeHtml(o)}</option>`).join('');
+      return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><select class="form-select" id="${id}" data-col="${col}">${opts}</select></div>`;
+    }
+    return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><input class="form-input" id="${id}" data-col="${col}"></div>`;
+  }).join('');
+}
+function readArmCustomFields() {
+  const out = {};
+  document.querySelectorAll('#custom-fields-arm [data-col]').forEach(el => {
     out[el.getAttribute('data-col')] = el.value;
   });
   return out;
@@ -2627,6 +2758,53 @@ function renderSettings() {
     <button class="set-btn" onclick="addCustomField()">Créer le champ</button>
   </div>`;
 
+  html += '<div class="set-section-title">Couleurs des points sur la carte</div>';
+  html += '<div class="set-card"><div class="set-empty" style="margin-bottom:6px">Selon l\u2019« État du support » de chaque point.</div>';
+  (CONFIG.lists.etatSupport || []).forEach((et, i) => {
+    const c = (CONFIG.colors && CONFIG.colors[et]) || (CONFIG.colors && CONFIG.colors._default) || '#38bdf8';
+    html += `<div class="set-color-row"><span class="set-color-label">${escapeHtml(et)}</span><input type="color" class="set-color" value="${c}" onchange="setStateColorByIndex(${i}, this.value)"></div>`;
+  });
+  const cdef = (CONFIG.colors && CONFIG.colors._default) || '#38bdf8';
+  html += `<div class="set-color-row"><span class="set-color-label">Autre / non renseigné</span><input type="color" class="set-color" value="${cdef}" onchange="setStateColor('_default', this.value)"></div>`;
+  html += '</div>';
+
+  html += '<div class="set-section-title">Armoires — listes de choix</div>';
+  ARM_LIST_FIELDS.forEach(f => {
+    const chips = (CONFIG.lists[f.key] || []).map((o, i) =>
+      `<span class="set-chip">${escapeHtml(o)}<span class="set-chip-x" onclick="removeOption('${f.key}',${i})">×</span></span>`
+    ).join('');
+    html += `<div class="set-card">
+      <div class="set-card-title">${escapeHtml(f.label)}</div>
+      <div class="set-chips">${chips || '<span class="set-empty">Aucune option</span>'}</div>
+      <div class="set-add">
+        <input class="set-input" id="addopt-${f.key}" placeholder="Nouvelle option…">
+        <button class="set-btn" onclick="addOption('${f.key}')">Ajouter</button>
+      </div>
+    </div>`;
+  });
+  html += '<div class="set-section-title">Armoires — champs personnalisés</div>';
+  if (!CONFIG.armCustomFields.length) html += '<div class="set-empty" style="padding:0 4px 8px">Aucun champ personnalisé d’armoire.</div>';
+  CONFIG.armCustomFields.forEach((cf, i) => {
+    const meta = cf.type === 'select' ? ('liste : ' + (cf.options || []).join(', ')) : 'texte libre';
+    html += `<div class="set-card">
+      <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ colonne « ${escapeHtml(cf.column)} » (Armoires)</span></div>
+      <div class="set-empty">${escapeHtml(meta)}</div>
+      <div class="set-add"><button class="set-btn set-btn-del" onclick="removeArmCustomField(${i})">Supprimer ce champ</button></div>
+    </div>`;
+  });
+  html += `<div class="set-card">
+    <div class="set-card-title">+ Ajouter un champ d'armoire</div>
+    <input class="set-input" id="acf-new-label" placeholder="Nom du champ (ex : Marque du coffret)" style="margin-bottom:8px">
+    <select class="set-input" id="acf-new-type" onchange="document.getElementById('acf-new-optrow').style.display=this.value==='select'?'flex':'none'" style="margin-bottom:8px">
+      <option value="text">Texte libre</option>
+      <option value="select">Liste de choix</option>
+    </select>
+    <div class="set-add" id="acf-new-optrow" style="display:none;margin-bottom:8px">
+      <input class="set-input" id="acf-new-options" placeholder="Options séparées par des virgules">
+    </div>
+    <button class="set-btn" onclick="addArmCustomField()">Créer le champ</button>
+  </div>`;
+
   box.innerHTML = html;
 }
 function addOption(key) {
@@ -2663,6 +2841,35 @@ function removeCustomField(idx) {
   if (!confirm('Retirer le champ « ' + cf.label + ' » du formulaire ?\nLa colonne et les données déjà dans le Sheet ne sont pas supprimées.')) return;
   CONFIG.customFields.splice(idx, 1);
   saveConfig(); renderSettings();
+}
+function addArmCustomField() {
+  const label = (document.getElementById('acf-new-label').value || '').trim();
+  if (!label) { showToast('Donne un nom au champ', 'error'); return; }
+  const type = document.getElementById('acf-new-type').value;
+  const options = type === 'select'
+    ? (document.getElementById('acf-new-options').value || '').split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+  const key = slugify(label);
+  if (CONFIG.armCustomFields.some(c => c.key === key || c.column === label)) { showToast('Ce champ existe déjà', 'error'); return; }
+  CONFIG.armCustomFields.push({ key, label, column: label, type, options });
+  saveConfig(); renderSettings();
+  showToast('Champ armoire « ' + label + ' » créé', 'success');
+}
+function removeArmCustomField(idx) {
+  const cf = CONFIG.armCustomFields[idx];
+  if (!confirm('Retirer le champ « ' + cf.label + ' » du formulaire armoire ?\nLa colonne et les données déjà dans le Sheet ne sont pas supprimées.')) return;
+  CONFIG.armCustomFields.splice(idx, 1);
+  saveConfig(); renderSettings();
+}
+function setStateColor(etat, color) {
+  if (!CONFIG.colors) CONFIG.colors = {};
+  CONFIG.colors[etat] = color;
+  saveConfig();
+  refreshMapMarkers();
+}
+function setStateColorByIndex(i, color) {
+  const et = (CONFIG.lists.etatSupport || [])[i];
+  if (et) setStateColor(et, color);
 }
 
 let masseOptions = {
@@ -3152,6 +3359,7 @@ async function syncArmoireToSheets(arm) {
         'Date': arm.date || ''
       }
     };
+    if (arm.custom) Object.assign(payload.data, arm.custom);
     const res = await fetch(SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -3174,17 +3382,24 @@ async function syncArmoireToSheets(arm) {
 async function flushSyncQueue() {
   if (isSyncing || !navigator.onLine) return;
   isSyncing = true;
-  let items = [];
-  try { items = await DB.all('queue'); } catch (e) {}
-  if (items.length) showToast('Synchronisation ' + items.length + ' éléments…');
-  for (const it of items) {
-    if (!navigator.onLine) break;
-    if (it.kind === 'del') await sendDeleteToSheets(it.sheet, it.targetId);
-    else if (it.kind === 'armoire') await syncArmoireToSheets(it.pt);
-    else await syncPointToSheets(it.pt);   // supprime de la file si succès
+  try {
+    let items = [];
+    try { items = await DB.all('queue'); } catch (e) {}
+    if (items.length) showToast('Synchronisation ' + items.length + ' éléments…');
+    for (const it of items) {
+      if (!navigator.onLine) break;
+      try {
+        if (it.kind === 'del') await sendDeleteToSheets(it.sheet, it.targetId);
+        else if (it.kind === 'armoire') await syncArmoireToSheets(it.pt);
+        else await syncPointToSheets(it.pt);
+      } catch (e) {
+        console.warn('Élément de file en échec, on passe au suivant :', e);
+      }
+    }
+  } finally {
+    isSyncing = false;                          // TOUJOURS libéré, même en cas d'erreur
   }
-  isSyncing = false;
-  uploadPendingPhotos();                    // draine aussi la file des photos
+  uploadPendingPhotos();
   updateStatus();
 }
 window.addEventListener('online', () => { resetSyncBackoff(); flushSyncQueue(); });
