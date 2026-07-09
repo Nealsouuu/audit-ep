@@ -2541,6 +2541,7 @@ function deleteArmoireFromMap(id) {
   map.closePopup();
   state.armoires = state.armoires.filter(a => a.id !== id);
   ARM_PHOTO_TYPES.forEach(k => { DB.del('photos', id + '__' + k).catch(() => {}); DB.del('photoQueue', id + '__' + k).catch(() => {}); });
+  try { DB.put('tombstones', { id, ts: Date.now() }); } catch (e) {}
   saveLocalArmoires();
   refreshMapMarkers();
   sendDeleteToSheets('Armoires', id).then(ok => {
@@ -3177,6 +3178,35 @@ function mapServerRow(r) {
     photos: {}
   };
 }
+// ── Traduit une ligne du Sheet "Armoires" en objet armoire local ──
+function mapServerArmoire(r) {
+  const custom = {};
+  (CONFIG.armCustomFields || []).forEach(cf => {
+    if (r[cf.column] !== undefined) custom[cf.column] = r[cf.column];
+  });
+  const photosStr = String(r['Photos'] || '');
+  const photoList = photosStr.split(',').map(s => s.trim()).filter(Boolean);
+  const photos = {};
+  ARM_PHOTO_TYPES.forEach(t => { photos[t] = photoList.includes(t); });
+  return {
+    id: String(r['ID'] || ''),
+    etatExt: r["État Ext de l'armoire"] || '',
+    etatInt: r["État Int de l'armoire"] || '',
+    abonnement: r['Abonnement (kVA)'] || '',
+    cable: r["Câble d'alimentation"] || '',
+    departs: r['Départs'] || '',
+    protection: r['Protection'] || '',
+    horloge: r['Horloge'] || '',
+    observations: r['Observations'] || '',
+    lng: parseFloat(r['Longitude']) || null,
+    lat: parseFloat(r['Latitude']) || null,
+    chantier: r['Chantier'] || '',
+    technicien: r['Technicien'] || '',
+    date: r['Date'] || '',
+    custom: custom,
+    photos: photos
+  };
+}
 // ── Polling automatique : reflète les modifs faites dans le Sheet (ajouts ET suppressions) ──
 let pollTimer = null, isLoading = false;
 function startPolling() {
@@ -3223,8 +3253,13 @@ async function loadFromSheets(silent) {
       const byId = new Map(state.points.map(p => [String(p.id), p]));
       let tombstones = new Set();
       try { tombstones = new Set((await DB.all('tombstones')).map(t => t.id)); } catch (e) {}
-      let pendingIds = new Set();
-      try { pendingIds = new Set((await DB.all('queue')).map(q => String(q.id))); } catch (e) {}
+      let queueRows = [];
+      try { queueRows = await DB.all('queue'); } catch (e) {}
+      let pendingIds = new Set(queueRows.map(q => String(q.id)));
+      let pendingArmIds = new Set(
+        queueRows.filter(q => q.kind === 'armoire')
+          .map(q => String((q.pt && q.pt.id) || String(q.id).replace(/^arm__/, '')))
+      );
 
       // 1) Ajouts : points du serveur absents en local (hors supprimés/tombstones)
       let added = 0;
@@ -3273,11 +3308,62 @@ async function loadFromSheets(silent) {
         refreshMapMarkers();
       }
 
+      // ── ARMOIRES : même logique add/update/remove que les points ci-dessus ──
+      // (jusqu'ici l'appli ne rapatriait JAMAIS les armoires du Sheet, seulement l'inverse)
+      let armAdded = 0, armUpdated = 0, armRemoved = 0;
+      try {
+        const armUrl = SCRIPT_URL + '?sheet=Armoires&chantier=' + encodeURIComponent(state.chantier);
+        const armRes = await fetch(armUrl);
+        const armData = await armRes.json();
+        if (armData.error) throw new Error(armData.error);
+
+        const armById = new Map(state.armoires.map(a => [String(a.id), a]));
+
+        (armData.rows || []).forEach(r => {
+          const id = String(r['ID'] || '');
+          if (!id || armById.has(id) || tombstones.has(id)) return;
+          armById.set(id, mapServerArmoire(r));
+          armAdded++;
+        });
+
+        (armData.rows || []).forEach(r => {
+          const id = String(r['ID'] || '');
+          if (!id || tombstones.has(id) || pendingArmIds.has(id)) return;
+          const existing = armById.get(id);
+          if (!existing) return;
+          const fresh = mapServerArmoire(r);
+          fresh.photos = existing.photos; // indicateurs photos gérés en local, pas dans le Sheet
+          const changed = JSON.stringify(fresh) !== JSON.stringify(Object.assign({}, existing, { photos: fresh.photos }));
+          if (changed) { armById.set(id, fresh); armUpdated++; }
+        });
+
+        const armServerIds = new Set((armData.rows || []).map(r => String(r['ID'] || '')));
+        for (const a of [...armById.values()]) {
+          const aid = String(a.id);
+          if (String(a.chantier) === String(state.chantier) && !armServerIds.has(aid) && !pendingArmIds.has(aid)) {
+            armById.delete(aid);
+            armRemoved++;
+          }
+        }
+
+        if (armAdded || armUpdated || armRemoved) {
+          state.armoires = [...armById.values()];
+          saveLocalArmoires();
+          refreshMapMarkers();
+          renderArmoires();
+        }
+      } catch (e) {
+        console.error('Load armoires error:', e);
+      }
+
       if (removed) showToast(removed + ' point' + (removed > 1 ? 's' : '') + ' retiré' + (removed > 1 ? 's' : '') + ' (supprimé du Sheet)', '');
-      else if (added || updated) {
+      else if (added || updated || armAdded || armUpdated || armRemoved) {
         const parts = [];
-        if (added) parts.push(added + ' ajouté' + (added > 1 ? 's' : ''));
-        if (updated) parts.push(updated + ' mis à jour');
+        if (added) parts.push(added + ' point' + (added > 1 ? 's' : '') + ' ajouté' + (added > 1 ? 's' : ''));
+        if (updated) parts.push(updated + ' point' + (updated > 1 ? 's' : '') + ' mis à jour');
+        if (armAdded) parts.push(armAdded + ' armoire' + (armAdded > 1 ? 's' : '') + ' ajoutée' + (armAdded > 1 ? 's' : ''));
+        if (armUpdated) parts.push(armUpdated + ' armoire' + (armUpdated > 1 ? 's' : '') + ' mise' + (armUpdated > 1 ? 's' : '') + ' à jour');
+        if (armRemoved) parts.push(armRemoved + ' armoire' + (armRemoved > 1 ? 's' : '') + ' retirée' + (armRemoved > 1 ? 's' : ''));
         showToast(parts.join(' · ') + ' ✓', 'success');
       }
       else if (!silent) showToast('À jour ✓', 'success');
