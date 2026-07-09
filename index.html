@@ -637,6 +637,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .set-color-row:first-child{border-top:none}
 .set-color-label{font-size:13px;color:var(--text)}
 .set-color{width:46px;height:30px;border:none;background:none;padding:0;cursor:pointer}
+.set-order-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border2,#334155)}
+.set-order-row:first-child{border-top:none}
+.set-mini{width:34px;height:30px;border-radius:8px;border:1px solid var(--border2,#334155);background:var(--bg1,#0f172a);color:var(--text);font-size:14px;margin-left:6px}
+.set-mini:disabled{opacity:.3}
 .map-filter{position:absolute;top:calc(env(safe-area-inset-top) + 64px);left:10px;z-index:800;max-width:58%;background:rgba(15,23,42,.9);backdrop-filter:blur(8px);color:var(--text);border:1px solid var(--border2);border-radius:999px;padding:8px 12px;font-size:13px;-webkit-appearance:none;appearance:none}
 .map-filter.active{border-color:var(--accent);color:var(--accent)}
 </style>
@@ -2624,7 +2628,9 @@ const CONFIG_DEFAULT = {
       options: ['Solaire faisable', 'Solaire infaisable', 'Solaire à projeter'] }
   ],
   armCustomFields: [],  // champs personnalisés des armoires (onglet Armoires)
-  colors: { 'Bon': '#4ade80', 'Moyen': '#facc15', 'Mauvais': '#f87171', 'À remplacer': '#f87171', '_default': '#38bdf8' }
+  colors: { 'Bon': '#4ade80', 'Moyen': '#facc15', 'Mauvais': '#f87171', 'À remplacer': '#f87171', '_default': '#38bdf8' },
+  orderPL: [],    // ordre des champs de la fiche point (vide = ordre d'origine)
+  orderARM: []    // ordre des champs de la fiche armoire
 };
 // Correspondance : clé config → <select> du formulaire → libellé lisible
 const LIST_FIELDS = [
@@ -2652,7 +2658,9 @@ async function loadConfig() {
         lists: Object.assign({}, CONFIG_DEFAULT.lists, rec.v.lists || {}),
         customFields: Array.isArray(rec.v.customFields) ? rec.v.customFields : [],
         armCustomFields: Array.isArray(rec.v.armCustomFields) ? rec.v.armCustomFields : [],
-        colors: Object.assign({}, CONFIG_DEFAULT.colors, rec.v.colors || {})
+        colors: Object.assign({}, CONFIG_DEFAULT.colors, rec.v.colors || {}),
+        orderPL: Array.isArray(rec.v.orderPL) ? rec.v.orderPL : [],
+        orderARM: Array.isArray(rec.v.orderARM) ? rec.v.orderARM : []
       };
     }
   } catch (e) {}
@@ -2662,6 +2670,8 @@ async function loadConfig() {
   });
   if (!Array.isArray(CONFIG.armCustomFields)) CONFIG.armCustomFields = [];
   if (!CONFIG.colors) CONFIG.colors = Object.assign({}, CONFIG_DEFAULT.colors);
+  if (!Array.isArray(CONFIG.orderPL)) CONFIG.orderPL = [];
+  if (!Array.isArray(CONFIG.orderARM)) CONFIG.orderARM = [];
   applyConfig();
 }
 async function saveConfig() {
@@ -2692,6 +2702,8 @@ function applyConfig() {
   // 4) champs personnalisés (points + armoires)
   renderCustomFields();
   renderArmCustomFields();
+  // 5) ordre des champs dans les deux fiches
+  applyFieldOrder();
 }
 // Rend les champs personnalisés dans le formulaire point lumineux
 function renderCustomFields() {
@@ -2736,6 +2748,84 @@ function readArmCustomFields() {
   return out;
 }
 
+/* ═══════════ ORDRE DES CHAMPS DANS LES FICHES ═══════════ */
+// Chaque entrée pointe un élément de la fiche ; son bloc (.form-row) est déplaçable.
+const PL_ORDER_DEFS = [
+  { key:'nbrSupports',   label:'Nbr supports',        el:'f-nbr-supports' },
+  { key:'typeSupport',   label:'Type de support',     el:'f-type-support' },
+  { key:'etatSupport',   label:'État du support',     el:'f-etat-support' },
+  { key:'hauteur',       label:'Hauteur',             el:'f-hauteur' },
+  { key:'typeAttache',   label:"Type d'attache",      el:'f-type-attache' },
+  { key:'nbrLuminaires', label:'Nbr luminaires',      el:'f-nbr-luminaires' },
+  { key:'typeLuminaire', label:'Type de luminaire',   el:'f-type-luminaire' },
+  { key:'etatLuminaire', label:'État luminaires',     el:'f-etat-luminaire' },
+  { key:'technologie',   label:'Technologie',         el:'f-technologie' },
+  { key:'puissance',     label:'Puissance',           el:'f-puissance' },
+  { key:'idArmoire',     label:'ID Armoire',          el:'f-id-armoire' },
+  { key:'classePrec',    label:'Classe de précision', el:'f-classe-precision' },
+  { key:'photos',        label:'Photos',              q:'.photo-grid' },
+  { key:'panier',        label:'Dans le panier',      el:'toggle-panier' },
+  { key:'observations',  label:'Observations',        el:'f-observations' },
+  { key:'custom',        label:'Champs personnalisés', el:'custom-fields-pl', self:true },
+];
+const ARM_ORDER_DEFS = [
+  { key:'etatExt',      label:'État extérieur',       el:'af-etat-ext' },
+  { key:'etatInt',      label:'État intérieur',       el:'af-etat-int' },
+  { key:'abonnement',   label:'Abonnement (kVA)',     el:'af-abonnement' },
+  { key:'cable',        label:"Câble d'alimentation", el:'af-cable' },
+  { key:'departs',      label:'Départs',              el:'af-departs' },
+  { key:'protection',   label:'Protection',           el:'af-protection' },
+  { key:'horloge',      label:'Horloge',              el:'af-horloge' },
+  { key:'photos',       label:'Photos',               q:'.photo-grid' },
+  { key:'observations', label:'Observations',         el:'af-observations' },
+  { key:'custom',       label:'Champs personnalisés', el:'custom-fields-arm', self:true },
+];
+function effectiveOrder(defs, saved) {
+  const keys = (saved || []).filter(k => defs.some(d => d.key === k));
+  defs.forEach(d => { if (!keys.includes(d.key)) keys.push(d.key); }); // nouveaux champs → à la fin
+  return keys;
+}
+function reorderForm(formSel, defs, saved) {
+  const form = document.querySelector(formSel);
+  if (!form) return;
+  const byKey = {};
+  defs.forEach(d => {
+    let node = null;
+    if (d.q) node = form.querySelector(d.q);
+    else if (d.el) {
+      const e = form.querySelector('#' + d.el);
+      node = e ? (d.self ? e : e.closest('.form-row')) : null;
+    }
+    if (node) byKey[d.key] = node;
+  });
+  const keys = effectiveOrder(defs, saved).filter(k => byKey[k]);
+  if (keys.length < 2) return;
+  const nodes = keys.map(k => byKey[k]);
+  const parent = nodes[0].parentNode;
+  // point d'insertion = position actuelle du bloc géré le plus haut dans la fiche
+  const earliest = nodes.reduce((a, b) =>
+    (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) ? a : b);
+  const marker = document.createElement('div');
+  parent.insertBefore(marker, earliest);
+  nodes.forEach(nd => parent.insertBefore(nd, marker));
+  parent.removeChild(marker);
+}
+function applyFieldOrder() {
+  reorderForm('#screen-form', PL_ORDER_DEFS, CONFIG.orderPL);
+  reorderForm('#screen-armoire-form', ARM_ORDER_DEFS, CONFIG.orderARM);
+}
+function moveField(which, idx, dir) {
+  const defs = which === 'PL' ? PL_ORDER_DEFS : ARM_ORDER_DEFS;
+  const prop = which === 'PL' ? 'orderPL' : 'orderARM';
+  const keys = effectiveOrder(defs, CONFIG[prop]);
+  const j = idx + dir;
+  if (j < 0 || j >= keys.length) return;
+  [keys[idx], keys[j]] = [keys[j], keys[idx]];
+  CONFIG[prop] = keys;
+  saveConfig();          // applique aussi l'ordre (via applyConfig)
+  renderSettings();
+}
+
 /* ═══════════ PAGE RÉGLAGES : rendu + édition ═══════════ */
 function renderSettings() {
   const box = document.getElementById('settings-body');
@@ -2777,6 +2867,20 @@ function renderSettings() {
     </div>
     <button class="set-btn" onclick="addCustomField()">Créer le champ</button>
   </div>`;
+
+  html += '<div class="set-section-title">Ordre des champs dans les fiches</div>';
+  [['PL', 'Fiche point lumineux', PL_ORDER_DEFS, CONFIG.orderPL], ['ARM', 'Fiche armoire', ARM_ORDER_DEFS, CONFIG.orderARM]].forEach(([which, title, defs, saved]) => {
+    const keys = effectiveOrder(defs, saved);
+    html += `<div class="set-card"><div class="set-card-title">${title}</div>`;
+    keys.forEach((k, i) => {
+      const d = defs.find(x => x.key === k);
+      html += `<div class="set-order-row"><span class="set-color-label">${escapeHtml(d.label)}</span><span>
+        <button class="set-mini" onclick="moveField('${which}',${i},-1)" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="set-mini" onclick="moveField('${which}',${i},1)" ${i === keys.length - 1 ? 'disabled' : ''}>▼</button>
+      </span></div>`;
+    });
+    html += '</div>';
+  });
 
   html += '<div class="set-section-title">Couleurs des points sur la carte</div>';
   html += '<div class="set-card"><div class="set-empty" style="margin-bottom:6px">Selon l\u2019« État du support » de chaque point.</div>';
