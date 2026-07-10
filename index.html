@@ -2555,6 +2555,7 @@ function deleteArmoireFromMap(id) {
   if (!confirm('Supprimer définitivement l\'armoire ' + arm.id + ' ?\nLes points lumineux rattachés ne seront pas supprimés.')) return;
   map.closePopup();
   state.armoires = state.armoires.filter(a => a.id !== id);
+  DB.put('tombstones', { id: 'ARM__' + id, ts: Date.now() }).catch(() => {});
   ARM_PHOTO_TYPES.forEach(k => { DB.del('photos', id + '__' + k).catch(() => {}); DB.del('photoQueue', id + '__' + k).catch(() => {}); });
   saveLocalArmoires();
   refreshMapMarkers();
@@ -2964,6 +2965,78 @@ function deleteTemplate(i) {
   CONFIG.templates.splice(i, 1);
   saveConfig(); renderSettings();
 }
+const TPL_EDIT_DEFS = [
+  { id:'f-nbr-supports',   label:'Nbr supports' },
+  { id:'f-type-support',   label:'Type de support',   list:'typeSupport' },
+  { id:'f-etat-support',   label:'État du support',   list:'etatSupport' },
+  { id:'f-hauteur',        label:'Hauteur' },
+  { id:'f-type-attache',   label:"Type d'attache",    list:'typeAttache' },
+  { id:'f-nbr-luminaires', label:'Nbr luminaires' },
+  { id:'f-type-luminaire', label:'Type de luminaire', list:'typeLuminaire' },
+  { id:'f-etat-luminaire', label:'État luminaires',   list:'etatLuminaire' },
+  { id:'f-technologie',    label:'Technologie',       list:'technologie' },
+  { id:'f-puissance',      label:'Puissance' },
+];
+function editTemplate(i) {
+  window._editTpl = (window._editTpl === i) ? null : i;
+  _openSections.add('Trames de fiche (point lumineux)');
+  renderSettings();
+}
+function renderTemplateEditor(t, i) {
+  let h = `<div class="set-card" style="border-color:var(--accent)">
+    <div class="set-card-title">Modifier « ${escapeHtml(t.name)} »</div>
+    <div class="form-label" style="margin-top:6px">Nom</div>
+    <input class="set-input" id="tpe-name" value="${escapeHtml(t.name)}" style="margin-bottom:8px">`;
+  TPL_EDIT_DEFS.forEach(d => {
+    const cur = (t.values || {})[d.id] || '';
+    h += `<div class="form-label" style="margin-top:6px">${escapeHtml(d.label)}</div>`;
+    if (d.list) {
+      const opts = ['<option value="">--</option>'].concat((CONFIG.lists[d.list] || []).map(o =>
+        `<option${o === cur ? ' selected' : ''}>${escapeHtml(o)}</option>`));
+      if (cur && !(CONFIG.lists[d.list] || []).includes(cur)) opts.push(`<option selected>${escapeHtml(cur)}</option>`);
+      h += `<select class="set-input" id="tpe-${d.id}" style="margin-bottom:6px">${opts.join('')}</select>`;
+    } else {
+      h += `<input class="set-input" id="tpe-${d.id}" value="${escapeHtml(cur)}" style="margin-bottom:6px">`;
+    }
+  });
+  (CONFIG.customFields || []).forEach(cf => {
+    const cur = (t.custom || {})[cf.column] || '';
+    h += `<div class="form-label" style="margin-top:6px">${escapeHtml(cf.label)}</div>`;
+    if (cf.type === 'select') {
+      const opts = ['<option value="">--</option>'].concat((cf.options || []).map(o =>
+        `<option${o === cur ? ' selected' : ''}>${escapeHtml(o)}</option>`));
+      h += `<select class="set-input" id="tpec-${cf.key}" data-col="${escapeHtml(cf.column)}" style="margin-bottom:6px">${opts.join('')}</select>`;
+    } else {
+      const ph = cf.type === 'multi' ? 'valeurs séparées par des virgules' : '';
+      h += `<input class="set-input" id="tpec-${cf.key}" data-col="${escapeHtml(cf.column)}" value="${escapeHtml(cur)}" placeholder="${ph}" style="margin-bottom:6px">`;
+    }
+  });
+  h += `<div class="set-add" style="margin-top:10px">
+    <button class="set-btn" onclick="saveTemplateEdit(${i})">Enregistrer la trame</button>
+    <button class="set-mini" style="width:auto;padding:0 12px" onclick="window._editTpl=null;renderSettings()">Annuler</button>
+  </div></div>`;
+  return h;
+}
+function saveTemplateEdit(i) {
+  const t = CONFIG.templates[i];
+  const name = (document.getElementById('tpe-name').value || '').trim();
+  if (name) t.name = name;
+  const values = {};
+  TPL_EDIT_DEFS.forEach(d => {
+    const el = document.getElementById('tpe-' + d.id);
+    if (el && el.value) values[d.id] = el.value;
+  });
+  const custom = {};
+  (CONFIG.customFields || []).forEach(cf => {
+    const el = document.getElementById('tpec-' + cf.key);
+    if (el && el.value) custom[cf.column] = el.value;
+  });
+  t.values = values;
+  t.custom = custom;
+  window._editTpl = null;
+  saveConfig(); renderSettings(); renderTemplatesBar();
+  showToast('Trame « ' + t.name + ' » enregistrée', 'success');
+}
 function tplColorChanged(i, color) {
   CONFIG.templates[i].color = color;
   saveConfig(); renderSettings(); renderTemplatesBar();
@@ -3058,9 +3131,10 @@ function renderSettings() {
         <label class="set-mini" style="display:flex;align-items:center;justify-content:center;cursor:pointer">📷
           <input type="file" accept="image/*" style="display:none" onchange="tplPhotoChanged(${i}, this)">
         </label>
-        <button class="set-mini" onclick="renameTemplate(${i})">✏️</button>
+        <button class="set-mini" onclick="editTemplate(${i})">✏️</button>
         <button class="set-mini" style="color:#f87171;border-color:#f87171" onclick="deleteTemplate(${i})">🗑</button>
       </div>`;
+      if (window._editTpl === i) html += renderTemplateEditor(t, i);
     });
   }
   html += '</div>';
@@ -3357,6 +3431,85 @@ let syncQueue = [];
 let isSyncing = false;
 
 // ── LIRE les données depuis Apps Script ──
+// ── LIRE les armoires depuis le Sheet (redescente serveur → app) ──
+function mapServerArmoire(r) {
+  const custom = {};
+  (CONFIG.armCustomFields || []).forEach(cf => { if (r[cf.column] !== undefined) custom[cf.column] = r[cf.column]; });
+  const photos = {};
+  const ph = String(r['Photos'] || '');
+  ARM_PHOTO_TYPES.forEach(t => { photos[t] = ph.indexOf(t) >= 0; });
+  return {
+    id: String(r['ID'] || ''),
+    etatExt: r["État Ext de l'armoire"] || '',
+    etatInt: r["État Int de l'armoire"] || '',
+    abonnement: r['Abonnement (kVA)'] || '',
+    cable: r["Câble d'alimentation"] || '',
+    departs: r['Départs'] || '',
+    protection: r['Protection'] || '',
+    horloge: r['Horloge'] || '',
+    observations: r['Observations'] || '',
+    lng: parseFloat(r['Longitude']) || null,
+    lat: parseFloat(r['Latitude']) || null,
+    chantier: r['Chantier'] || '',
+    technicien: r['Technicien'] || '',
+    date: r['Date'] || '',
+    custom, photos
+  };
+}
+function armSig(a) {
+  return JSON.stringify([a.etatExt, a.etatInt, a.abonnement, a.cable, a.departs,
+    a.protection, a.horloge, a.observations, a.lat, a.lng, a.custom || {}]);
+}
+async function loadArmoiresFromSheets(silent) {
+  if (!navigator.onLine) return;
+  try {
+    const url = SCRIPT_URL + '?sheet=Armoires&chantier=' + encodeURIComponent(state.chantier);
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const byId = new Map(state.armoires.map(a => [String(a.id), a]));
+    const pendingArm = new Set(), pendingDel = new Set();
+    let tomb = new Set();
+    try {
+      (await DB.all('queue')).forEach(it => {
+        if (it.kind === 'armoire' && it.pt) pendingArm.add(String(it.pt.id));
+        if (it.kind === 'del' && it.sheet === 'Armoires') pendingDel.add(String(it.targetId));
+      });
+    } catch (e) {}
+    try { tomb = new Set((await DB.all('tombstones')).map(t => String(t.id))); } catch (e) {}
+    let changed = 0;
+    const serverIds = new Set();
+    (data.rows || []).forEach(r => {
+      const id = String(r['ID'] || '');
+      if (!id) return;
+      serverIds.add(id);
+      if (tomb.has('ARM__' + id) || pendingDel.has(id)) return;   // supprimée sur cet appareil
+      const srv = mapServerArmoire(r);
+      const loc = byId.get(id);
+      if (!loc) { byId.set(id, srv); changed++; }
+      else if (!pendingArm.has(id) && armSig(loc) !== armSig(srv)) {
+        byId.set(id, Object.assign({}, loc, srv, { photos: Object.assign({}, srv.photos, loc.photos) }));
+        changed++;
+      }
+    });
+    // Réconciliation descendante : armoire supprimée du Sheet → retirée localement
+    for (const a of [...byId.values()]) {
+      const id = String(a.id);
+      if (String(a.chantier) === String(state.chantier) && !serverIds.has(id) && !pendingArm.has(id) && !pendingDel.has(id)) {
+        byId.delete(id);
+        changed++;
+      }
+    }
+    if (changed) {
+      state.armoires = [...byId.values()];
+      saveLocalArmoires();
+      refreshMapMarkers();
+      if (currentScreen === 'armoires') renderArmoires();
+      if (!silent) showToast(state.armoires.length + ' armoire' + (state.armoires.length > 1 ? 's' : '') + ' synchronisée(s) ✓', 'success');
+    }
+  } catch (e) { console.warn('load armoires:', e); }
+}
+
 function mapServerRow(r) {
   const custom = {};
   (CONFIG.customFields || []).forEach(cf => {
@@ -3496,6 +3649,7 @@ async function loadFromSheets(silent) {
       console.error('Load error:', e);
       if (!silent) showToast('Mode hors-ligne', '');
     }
+    await loadArmoiresFromSheets(silent);   // redescend aussi les armoires du Sheet
     flushSyncQueue();                    // pousse les points locaux en attente
   } finally {
     isLoading = false;
