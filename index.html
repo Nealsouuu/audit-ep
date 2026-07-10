@@ -1970,7 +1970,7 @@ function refreshMapMarkers() {
   state.armoires.forEach(arm => {
     if (!arm.lat || !arm.lng) return;
     if (state.filterArmoire && String(arm.id) !== state.filterArmoire) return;
-    const nbPts = state.points.filter(p => p.idArmoire === arm.id).length;
+    const nbPts = state.points.filter(p => String(p.idArmoire || '').trim() === String(arm.id).trim()).length;
     const icon = L.divIcon({
       className: '',
       html: `<div style="width:22px;height:22px;background:#fb923c;border:2px solid white;border-radius:3px;box-shadow:0 2px 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center">
@@ -2391,7 +2391,7 @@ function renderArmoires() {
     return;
   }
   scroll.innerHTML = state.armoires.map(arm => {
-    const nbPts = state.points.filter(p => p.idArmoire === arm.id).length;
+    const nbPts = state.points.filter(p => String(p.idArmoire || '').trim() === String(arm.id).trim()).length;
     const etatColor = arm.etatExt === 'Bon' ? '#4ade80' : arm.etatExt === 'Moyen' ? '#facc15' : arm.etatExt ? '#f87171' : '#64748b';
     return `<div class="armoire-item" onclick="showArmoireForm(state.armoires.find(a=>a.id==='${arm.id}'))">
       <div class="armoire-icon">
@@ -2647,7 +2647,8 @@ const CONFIG_DEFAULT = {
   colors: { 'Bon': '#4ade80', 'Moyen': '#facc15', 'Mauvais': '#f87171', 'À remplacer': '#f87171', '_default': '#38bdf8' },
   orderPL: [],    // ordre des champs de la fiche point (vide = ordre d'origine)
   orderARM: [],   // ordre des champs de la fiche armoire
-  templates: []   // trames de fiche : { key, name, thumb, values, custom }
+  templates: [],  // trames de fiche : { key, name, thumb, values, custom }
+  updatedAt: 0    // horodatage pour la synchro des réglages entre appareils
 };
 // Correspondance : clé config → <select> du formulaire → libellé lisible
 const LIST_FIELDS = [
@@ -2678,7 +2679,8 @@ async function loadConfig() {
         colors: Object.assign({}, CONFIG_DEFAULT.colors, rec.v.colors || {}),
         orderPL: Array.isArray(rec.v.orderPL) ? rec.v.orderPL : [],
         orderARM: Array.isArray(rec.v.orderARM) ? rec.v.orderARM : [],
-        templates: Array.isArray(rec.v.templates) ? rec.v.templates : []
+        templates: Array.isArray(rec.v.templates) ? rec.v.templates : [],
+        updatedAt: Number(rec.v.updatedAt) || 0
       };
     }
   } catch (e) {}
@@ -2694,8 +2696,10 @@ async function loadConfig() {
   applyConfig();
 }
 async function saveConfig() {
+  CONFIG.updatedAt = Date.now();
   try { await DB.put('meta', { k: 'config', v: CONFIG }); } catch (e) {}
   applyConfig();
+  pushConfigToSheets();          // partage les réglages avec les autres appareils
 }
 function fillSelect(sel, options) {
   if (!sel) return;
@@ -2977,6 +2981,19 @@ const TPL_EDIT_DEFS = [
   { id:'f-technologie',    label:'Technologie',       list:'technologie' },
   { id:'f-puissance',      label:'Puissance' },
 ];
+function newTemplateFromSettings() {
+  const name = (prompt('Nom de la nouvelle trame :') || '').trim();
+  if (!name) return;
+  if (CONFIG.templates.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+    showToast('Une trame porte déjà ce nom', 'error');
+    return;
+  }
+  CONFIG.templates.push({ key: slugify(name) + '_' + Date.now(), name, thumb: null, color: null, values: {}, custom: {} });
+  window._editTpl = CONFIG.templates.length - 1;   // ouvre directement l'éditeur
+  _openSections.add('Trames de fiche (point lumineux)');
+  saveConfig();
+  renderSettings();
+}
 function editTemplate(i) {
   window._editTpl = (window._editTpl === i) ? null : i;
   _openSections.add('Trames de fiche (point lumineux)');
@@ -3137,6 +3154,7 @@ function renderSettings() {
       if (window._editTpl === i) html += renderTemplateEditor(t, i);
     });
   }
+  html += '<div class="set-add" style="margin-top:10px"><button class="set-btn" onclick="newTemplateFromSettings()">＋ Nouvelle trame</button></div>';
   html += '</div>';
 
   html += '<div class="set-section-title">Ordre des champs dans les fiches</div>';
@@ -3431,6 +3449,21 @@ let syncQueue = [];
 let isSyncing = false;
 
 // ── LIRE les données depuis Apps Script ──
+// Lecture tolérante d'une colonne : essai exact, puis en ignorant casse/accents/espaces/underscores.
+const _colCache = new WeakMap();
+function colVal(r, name) {
+  if (r[name] !== undefined) return r[name];
+  let idx = _colCache.get(r);
+  if (!idx) {
+    idx = {};
+    const norm = k => String(k).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    Object.keys(r).forEach(k => { idx[norm(k)] = k; });
+    _colCache.set(r, idx);
+  }
+  const nn = String(name).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  const k = idx[nn];
+  return k !== undefined ? r[k] : undefined;
+}
 // ── LIRE les armoires depuis le Sheet (redescente serveur → app) ──
 function mapServerArmoire(r) {
   const custom = {};
@@ -3510,6 +3543,56 @@ async function loadArmoiresFromSheets(silent) {
   } catch (e) { console.warn('load armoires:', e); }
 }
 
+/* ═══════════ RÉGLAGES PARTAGÉS ENTRE APPAREILS (onglet "Config" du Sheet) ═══════════
+   La config complète (trames, listes, couleurs, ordre, champs perso) est stockée en JSON
+   découpé sur des colonnes JSON1..JSON10 d'une ligne unique. Dernier enregistrement gagne. */
+let _cfgTabWarned = false;
+function _cfgTabMissing(e) {
+  if (!_cfgTabWarned && String(e).indexOf('Sheet not found') >= 0) {
+    _cfgTabWarned = true;
+    showToast('Ajoutez un onglet « Config » dans le Sheet pour partager les réglages', 'error');
+  }
+}
+async function pushConfigToSheets() {
+  if (!navigator.onLine) return;   // repoussé par la synchro suivante (horodatage local plus récent)
+  try {
+    const json = JSON.stringify(CONFIG);
+    const data = { 'ID': 'config', 'Updated': CONFIG.updatedAt || 0 };
+    const CHUNK = 45000;           // limite Google Sheets ≈ 50 000 caractères par cellule
+    for (let i = 0; i < 10; i++) data['JSON' + (i + 1)] = json.slice(i * CHUNK, (i + 1) * CHUNK);
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'upsert', sheet: 'Config', id: 'config', data })
+    });
+    const r = await res.json();
+    if (r.error) throw new Error(r.error);
+  } catch (e) { console.warn('push config:', e); _cfgTabMissing(e); }
+}
+async function syncConfigWithSheets(silent) {
+  if (!navigator.onLine) return;
+  try {
+    const res = await fetch(SCRIPT_URL + '?sheet=Config');
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const row = (data.rows || []).find(r => String(r['ID']) === 'config');
+    if (!row) { if ((CONFIG.updatedAt || 0) > 0) pushConfigToSheets(); return; }
+    const remoteTs = Number(row['Updated']) || 0;
+    const localTs = CONFIG.updatedAt || 0;
+    if (remoteTs > localTs) {
+      let json = '';
+      for (let i = 1; i <= 10; i++) json += String(row['JSON' + i] || '');
+      const parsed = JSON.parse(json);
+      await DB.put('meta', { k: 'config', v: parsed });
+      await loadConfig();                          // fusion + application immédiate
+      if (currentScreen === 'settings') renderSettings();
+      if (!silent) showToast('Réglages synchronisés depuis le Sheet ✓', 'success');
+    } else if (localTs > remoteTs) {
+      pushConfigToSheets();                        // cet appareil est plus récent → il partage
+    }
+  } catch (e) { console.warn('sync config:', e); _cfgTabMissing(e); }
+}
+
 function mapServerRow(r) {
   const custom = {};
   (CONFIG.customFields || []).forEach(cf => {
@@ -3517,9 +3600,9 @@ function mapServerRow(r) {
   });
   return {
     id: String(r['ID'] || ''),
-    idArmoire: r['ID Armoire'] || '',
-    classePrecision: r['Classe de precision'] || '',
-    sourcePosition: r['Source position'] || '',
+    idArmoire: String(colVal(r, 'ID Armoire') || '').trim(),
+    classePrecision: colVal(r, 'Classe de precision') || '',
+    sourcePosition: colVal(r, 'Source position') || '',
     gpsAccuracy: (r['Exactitude_m'] !== '' && r['Exactitude_m'] != null) ? Number(r['Exactitude_m']) : null,
     nbrSupports: r['Nbr supports'] || '',
     typeSupport: r['Types de support'] || '',
@@ -3650,6 +3733,7 @@ async function loadFromSheets(silent) {
       if (!silent) showToast('Mode hors-ligne', '');
     }
     await loadArmoiresFromSheets(silent);   // redescend aussi les armoires du Sheet
+    await syncConfigWithSheets(silent);     // réglages partagés (trames, listes, couleurs…)
     flushSyncQueue();                    // pousse les points locaux en attente
   } finally {
     isLoading = false;
