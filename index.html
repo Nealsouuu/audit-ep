@@ -652,6 +652,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .set-tpl-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border2,#334155)}
 .set-tpl-row:first-child{border-top:none}
 .set-tpl-thumb{width:52px;height:40px;border-radius:6px;object-fit:cover;background:var(--bg1,#0f172a);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:18px}
+.set-sec-head{cursor:pointer;user-select:none;padding:10px 4px;margin:4px 0}
+.set-caret{display:inline-block;width:16px;color:var(--accent)}
+.multi-chips{display:flex;flex-wrap:wrap;gap:7px;padding:4px 0}
+.mchip{padding:7px 12px;border:1px solid var(--border2,#334155);border-radius:999px;font-size:13px;color:var(--text);background:var(--bg1,#0f172a);cursor:pointer}
+.mchip.on{border-color:var(--accent);color:var(--accent);background:rgba(56,189,248,.14)}
 .map-filter{position:absolute;top:calc(env(safe-area-inset-top) + 64px);left:10px;z-index:800;max-width:58%;background:rgba(15,23,42,.9);backdrop-filter:blur(8px);color:var(--text);border:1px solid var(--border2);border-radius:999px;padding:8px 12px;font-size:13px;-webkit-appearance:none;appearance:none}
 .map-filter.active{border-color:var(--accent);color:var(--accent)}
 </style>
@@ -854,8 +859,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="form-section-title">Armoire de rattachement</div>
     <div class="form-row">
       <div class="form-label">ID Armoire</div>
-      <input class="form-input" type="text" id="f-id-armoire" list="armoire-list" placeholder="ex: ARM-001" autocapitalize="characters">
-      <datalist id="armoire-list"></datalist>
+      <select class="form-select" id="f-id-armoire"></select>
     </div>
 
     <div class="form-section-title">Support</div>
@@ -2156,19 +2160,16 @@ function showForm(pt) {
   document.getElementById('f-technologie').value = pt ? (pt.technologie || '') : '';
   document.getElementById('f-puissance').value = pt ? (pt.puissance || '') : '';
   document.getElementById('f-observations').value = pt ? (pt.observations || '') : '';
-  document.getElementById('f-id-armoire').value = pt ? (pt.idArmoire || '') : '';
+  populateIdArmoireSelect(pt ? (pt.idArmoire || '') : '');
   document.getElementById('f-classe-precision').value = pt ? (pt.classePrecision || 'C') : 'C';
   renderCustomFields();
   (CONFIG.customFields || []).forEach(cf => {
     const el = document.getElementById('cf-' + cf.key);
-    if (el) el.value = (pt && pt.custom && pt.custom[cf.column] != null) ? pt.custom[cf.column] : '';
+    if (el) setFieldEl(el, (pt && pt.custom && pt.custom[cf.column] != null) ? pt.custom[cf.column] : '');
   });
   renderTemplatesBar();
-
-  // datalist des armoires déjà saisies
-  const dl = document.getElementById('armoire-list');
-  const armoires = [...new Set(state.points.map((p) => p.idArmoire).filter(Boolean))].sort();
-  dl.innerHTML = armoires.map((a) => '<option value="' + escapeHtml(a) + '">').join('');
+  const _fs = document.querySelector('#screen-form .form-scroll');
+  if (_fs) _fs.style.borderTop = '';
 
   const toggle = document.getElementById('toggle-panier');
   toggle.classList.toggle('on', state.panierInForm);
@@ -2430,7 +2431,7 @@ function showArmoireForm(arm) {
   renderArmCustomFields();
   (CONFIG.armCustomFields || []).forEach(cf => {
     const el = document.getElementById('acf-' + cf.key);
-    if (el) el.value = (arm && arm.custom && arm.custom[cf.column] != null) ? arm.custom[cf.column] : '';
+    if (el) setFieldEl(el, (arm && arm.custom && arm.custom[cf.column] != null) ? arm.custom[cf.column] : '');
   });
 
   const gpsEl = document.getElementById('arm-gps-display');
@@ -2731,6 +2732,10 @@ function renderCustomFields() {
   box.innerHTML = (CONFIG.customFields || []).map(cf => {
     const id = 'cf-' + cf.key;
     const col = escapeHtml(cf.column);
+    if (cf.type === 'multi') {
+      const chips = (cf.options || []).map(o => `<span class="mchip" data-v="${escapeHtml(o)}" onclick="toggleChip(this)">${escapeHtml(o)}</span>`).join('');
+      return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><div class="multi-chips" id="${id}" data-col="${col}">${chips}</div></div>`;
+    }
     if (cf.type === 'select') {
       const opts = '<option value=""></option>' + (cf.options || []).map(o => `<option>${escapeHtml(o)}</option>`).join('');
       return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><select class="form-select" id="${id}" data-col="${col}">${opts}</select></div>`;
@@ -2742,7 +2747,7 @@ function renderCustomFields() {
 function readCustomFields() {
   const out = {};
   document.querySelectorAll('#custom-fields-pl [data-col]').forEach(el => {
-    out[el.getAttribute('data-col')] = el.value;
+    out[el.getAttribute('data-col')] = readFieldEl(el);
   });
   return out;
 }
@@ -2752,6 +2757,10 @@ function renderArmCustomFields() {
   box.innerHTML = (CONFIG.armCustomFields || []).map(cf => {
     const id = 'acf-' + cf.key;
     const col = escapeHtml(cf.column);
+    if (cf.type === 'multi') {
+      const chips = (cf.options || []).map(o => `<span class="mchip" data-v="${escapeHtml(o)}" onclick="toggleChip(this)">${escapeHtml(o)}</span>`).join('');
+      return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><div class="multi-chips" id="${id}" data-col="${col}">${chips}</div></div>`;
+    }
     if (cf.type === 'select') {
       const opts = '<option value=""></option>' + (cf.options || []).map(o => `<option>${escapeHtml(o)}</option>`).join('');
       return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><select class="form-select" id="${id}" data-col="${col}">${opts}</select></div>`;
@@ -2762,9 +2771,47 @@ function renderArmCustomFields() {
 function readArmCustomFields() {
   const out = {};
   document.querySelectorAll('#custom-fields-arm [data-col]').forEach(el => {
-    out[el.getAttribute('data-col')] = el.value;
+    out[el.getAttribute('data-col')] = readFieldEl(el);
   });
   return out;
+}
+// ── Helpers champs à choix multiples (puces) ──
+function toggleChip(el) { el.classList.toggle('on'); }
+function readFieldEl(el) {
+  if (el.classList.contains('multi-chips'))
+    return [...el.querySelectorAll('.mchip.on')].map(c => c.dataset.v).join(', ');
+  return el.value;
+}
+function setFieldEl(el, val) {
+  if (el.classList.contains('multi-chips')) {
+    const set = new Set(String(val || '').split(',').map(x => x.trim()).filter(Boolean));
+    el.querySelectorAll('.mchip').forEach(c => c.classList.toggle('on', set.has(c.dataset.v)));
+  } else el.value = val || '';
+}
+// ── Liste déroulante des armoires dans la fiche point ──
+function populateIdArmoireSelect(cur) {
+  const sel = document.getElementById('f-id-armoire');
+  if (!sel) return;
+  const ids = new Set();
+  state.armoires.forEach(a => { if (a.id) ids.add(String(a.id)); });
+  state.points.forEach(p => { if (p.idArmoire) ids.add(String(p.idArmoire)); });
+  if (cur) ids.add(String(cur));
+  const sorted = [...ids].sort();
+  sel.innerHTML = '<option value="">-- Aucune --</option>' +
+    sorted.map(id => `<option${String(cur) === id ? ' selected' : ''}>${escapeHtml(id)}</option>`).join('') +
+    '<option value="__new">＋ Nouvel ID armoire…</option>';
+  sel.value = cur || '';
+  sel.onchange = function() {
+    if (this.value === '__new') {
+      const v = (prompt('Nouvel ID armoire :') || '').trim();
+      if (v) {
+        const o = document.createElement('option');
+        o.textContent = v;
+        this.insertBefore(o, this.lastElementChild);
+        this.value = v;
+      } else this.value = '';
+    }
+  };
 }
 
 /* ═══════════ ORDRE DES CHAMPS DANS LES FICHES ═══════════ */
@@ -2856,7 +2903,7 @@ function renderTemplatesBar() {
   const bar = document.getElementById('tpl-bar');
   if (!bar) return;
   let html = (CONFIG.templates || []).map((t, i) => `
-    <div class="tpl-card" onclick="applyTemplate(${i})">
+    <div class="tpl-card" style="${t.color ? 'border:2px solid ' + t.color : ''}" onclick="applyTemplate(${i})">
       ${t.thumb ? `<img class="tpl-thumb" src="${t.thumb}" alt="">` : `<div class="tpl-thumb">💡</div>`}
       <div class="tpl-name">${escapeHtml(t.name)}</div>
     </div>`).join('');
@@ -2876,8 +2923,10 @@ function applyTemplate(i) {
   });
   Object.entries(t.custom || {}).forEach(([col, v]) => {
     const el = document.querySelector('#custom-fields-pl [data-col="' + CSS.escape(col) + '"]');
-    if (el) el.value = v;
+    if (el) setFieldEl(el, v);
   });
+  const fs = document.querySelector('#screen-form .form-scroll');
+  if (fs) fs.style.borderTop = t.color ? ('4px solid ' + t.color) : '';
   showToast('Trame « ' + t.name + ' » appliquée', 'success');
 }
 function saveFormAsTemplate() {
@@ -2894,16 +2943,36 @@ function saveFormAsTemplate() {
     showToast('Remplis d\u2019abord la fiche avec les valeurs de la trame', 'error');
     return;
   }
-  CONFIG.templates.push({ key: slugify(name) + '_' + Date.now(), name, thumb: null, values, custom });
+  const ex = CONFIG.templates.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
+  if (ex >= 0) {
+    if (!confirm('La trame « ' + CONFIG.templates[ex].name + ' » existe déjà.\nLa mettre à jour avec les valeurs actuelles de la fiche ?')) return;
+    CONFIG.templates[ex].values = values;
+    CONFIG.templates[ex].custom = custom;
+    saveConfig();
+    renderTemplatesBar();
+    showToast('Trame « ' + CONFIG.templates[ex].name + ' » mise à jour', 'success');
+    return;
+  }
+  CONFIG.templates.push({ key: slugify(name) + '_' + Date.now(), name, thumb: null, color: null, values, custom });
   saveConfig();
   renderTemplatesBar();
-  showToast('Trame « ' + name + ' » créée — photo ajoutable dans Réglages', 'success');
+  showToast('Trame « ' + name + ' » créée — photo et couleur dans Réglages', 'success');
 }
 function deleteTemplate(i) {
   const t = CONFIG.templates[i];
   if (!confirm('Supprimer la trame « ' + t.name + ' » ?')) return;
   CONFIG.templates.splice(i, 1);
   saveConfig(); renderSettings();
+}
+function tplColorChanged(i, color) {
+  CONFIG.templates[i].color = color;
+  saveConfig(); renderSettings(); renderTemplatesBar();
+}
+function renameTemplate(i) {
+  const v = (prompt('Nouveau nom de la trame :', CONFIG.templates[i].name) || '').trim();
+  if (!v) return;
+  CONFIG.templates[i].name = v;
+  saveConfig(); renderSettings(); renderTemplatesBar();
 }
 function tplPhotoChanged(i, input) {
   const file = input.files && input.files[0];
@@ -2924,6 +2993,12 @@ function tplPhotoChanged(i, input) {
 }
 
 /* ═══════════ PAGE RÉGLAGES : rendu + édition ═══════════ */
+let _openSections = new Set();
+function toggleSection(el) {
+  const t = el.dataset.t;
+  if (_openSections.has(t)) _openSections.delete(t); else _openSections.add(t);
+  renderSettings();
+}
 function renderSettings() {
   const box = document.getElementById('settings-body');
   if (!box) return;
@@ -2945,7 +3020,7 @@ function renderSettings() {
   html += '<div class="set-section-title">Champs personnalisés (nouvelles colonnes)</div>';
   if (!CONFIG.customFields.length) html += '<div class="set-empty" style="padding:0 4px 8px">Aucun champ personnalisé pour le moment.</div>';
   CONFIG.customFields.forEach((cf, i) => {
-    const meta = cf.type === 'select' ? ('liste : ' + (cf.options || []).join(', ')) : 'texte libre';
+    const meta = cf.type === 'select' ? ('liste : ' + (cf.options || []).join(', ')) : (cf.type === 'multi' ? ('choix multiples : ' + (cf.options || []).join(', ')) : 'texte libre');
     html += `<div class="set-card">
       <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ colonne « ${escapeHtml(cf.column)} »</span></div>
       <div class="set-empty">${escapeHtml(meta)}</div>
@@ -2955,9 +3030,10 @@ function renderSettings() {
   html += `<div class="set-card">
     <div class="set-card-title">+ Ajouter un champ</div>
     <input class="set-input" id="cf-new-label" placeholder="Nom du champ (ex : Marque du luminaire)" style="margin-bottom:8px">
-    <select class="set-input" id="cf-new-type" onchange="document.getElementById('cf-new-optrow').style.display=this.value==='select'?'flex':'none'" style="margin-bottom:8px">
+    <select class="set-input" id="cf-new-type" onchange="document.getElementById('cf-new-optrow').style.display=(this.value==='select'||this.value==='multi')?'flex':'none'" style="margin-bottom:8px">
       <option value="text">Texte libre</option>
       <option value="select">Liste de choix</option>
+      <option value="multi">Liste à choix multiples</option>
     </select>
     <div class="set-add" id="cf-new-optrow" style="display:none;margin-bottom:8px">
       <input class="set-input" id="cf-new-options" placeholder="Options séparées par des virgules">
@@ -2978,9 +3054,11 @@ function renderSettings() {
           <div class="set-color-label" style="font-weight:600">${escapeHtml(t.name)}</div>
           <div class="set-empty">${nb} caractéristique${nb > 1 ? 's' : ''}</div>
         </div>
+        <input type="color" class="set-color" style="width:34px;height:30px" value="${t.color || '#38bdf8'}" onchange="tplColorChanged(${i}, this.value)" title="Couleur de l'encadré">
         <label class="set-mini" style="display:flex;align-items:center;justify-content:center;cursor:pointer">📷
           <input type="file" accept="image/*" style="display:none" onchange="tplPhotoChanged(${i}, this)">
         </label>
+        <button class="set-mini" onclick="renameTemplate(${i})">✏️</button>
         <button class="set-mini" style="color:#f87171;border-color:#f87171" onclick="deleteTemplate(${i})">🗑</button>
       </div>`;
     });
@@ -3028,7 +3106,7 @@ function renderSettings() {
   html += '<div class="set-section-title">Armoires — champs personnalisés</div>';
   if (!CONFIG.armCustomFields.length) html += '<div class="set-empty" style="padding:0 4px 8px">Aucun champ personnalisé d’armoire.</div>';
   CONFIG.armCustomFields.forEach((cf, i) => {
-    const meta = cf.type === 'select' ? ('liste : ' + (cf.options || []).join(', ')) : 'texte libre';
+    const meta = cf.type === 'select' ? ('liste : ' + (cf.options || []).join(', ')) : (cf.type === 'multi' ? ('choix multiples : ' + (cf.options || []).join(', ')) : 'texte libre');
     html += `<div class="set-card">
       <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ colonne « ${escapeHtml(cf.column)} » (Armoires)</span></div>
       <div class="set-empty">${escapeHtml(meta)}</div>
@@ -3038,9 +3116,10 @@ function renderSettings() {
   html += `<div class="set-card">
     <div class="set-card-title">+ Ajouter un champ d'armoire</div>
     <input class="set-input" id="acf-new-label" placeholder="Nom du champ (ex : Marque du coffret)" style="margin-bottom:8px">
-    <select class="set-input" id="acf-new-type" onchange="document.getElementById('acf-new-optrow').style.display=this.value==='select'?'flex':'none'" style="margin-bottom:8px">
+    <select class="set-input" id="acf-new-type" onchange="document.getElementById('acf-new-optrow').style.display=(this.value==='select'||this.value==='multi')?'flex':'none'" style="margin-bottom:8px">
       <option value="text">Texte libre</option>
       <option value="select">Liste de choix</option>
+      <option value="multi">Liste à choix multiples</option>
     </select>
     <div class="set-add" id="acf-new-optrow" style="display:none;margin-bottom:8px">
       <input class="set-input" id="acf-new-options" placeholder="Options séparées par des virgules">
@@ -3048,7 +3127,20 @@ function renderSettings() {
     <button class="set-btn" onclick="addArmCustomField()">Créer le champ</button>
   </div>`;
 
-  box.innerHTML = html;
+  // Sections repliables : seul le titre est visible, on développe au tap
+  const parts = html.split('<div class="set-section-title">');
+  let out = parts[0];
+  parts.slice(1).forEach(part => {
+    const end = part.indexOf('</div>');
+    const title = part.slice(0, end);
+    const body = part.slice(end + 6);
+    const open = _openSections.has(title);
+    out += `<div class="set-sec">
+      <div class="set-section-title set-sec-head" data-t="${title}" onclick="toggleSection(this)"><span class="set-caret">${open ? '▾' : '▸'}</span>${title}</div>
+      <div class="set-sec-body" style="display:${open ? 'block' : 'none'}">${body}</div>
+    </div>`;
+  });
+  box.innerHTML = out;
 }
 function addOption(key) {
   const inp = document.getElementById('addopt-' + key);
@@ -3070,7 +3162,7 @@ function addCustomField() {
   const label = (document.getElementById('cf-new-label').value || '').trim();
   if (!label) { showToast('Donne un nom au champ', 'error'); return; }
   const type = document.getElementById('cf-new-type').value;
-  const options = type === 'select'
+  const options = (type === 'select' || type === 'multi')
     ? (document.getElementById('cf-new-options').value || '').split(',').map(s => s.trim()).filter(Boolean)
     : [];
   const key = slugify(label);
@@ -3089,7 +3181,7 @@ function addArmCustomField() {
   const label = (document.getElementById('acf-new-label').value || '').trim();
   if (!label) { showToast('Donne un nom au champ', 'error'); return; }
   const type = document.getElementById('acf-new-type').value;
-  const options = type === 'select'
+  const options = (type === 'select' || type === 'multi')
     ? (document.getElementById('acf-new-options').value || '').split(',').map(s => s.trim()).filter(Boolean)
     : [];
   const key = slugify(label);
