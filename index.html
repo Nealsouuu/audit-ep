@@ -1010,7 +1010,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite.</div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v31</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2693,6 +2693,10 @@ async function loadConfig() {
   if (!Array.isArray(CONFIG.orderPL)) CONFIG.orderPL = [];
   if (!Array.isArray(CONFIG.orderARM)) CONFIG.orderARM = [];
   if (!Array.isArray(CONFIG.templates)) CONFIG.templates = [];
+  if (!CONFIG.updatedAt) {   // config créée avant la version partagée : on l'horodate pour qu'elle parte au Sheet
+    CONFIG.updatedAt = Date.now();
+    try { await DB.put('meta', { k: 'config', v: CONFIG }); } catch (e) {}
+  }
   applyConfig();
 }
 async function saveConfig() {
