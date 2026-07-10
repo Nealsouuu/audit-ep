@@ -45,28 +45,6 @@
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-body); }
 
-/* ── Barre de recherche / filtre (onglets Liste & Armoires) ── */
-.search-bar { display: flex; gap: 8px; padding: 10px 14px; background: var(--bg); border-bottom: 1px solid var(--border); flex: none; }
-.search-input-wrap { position: relative; flex: 1; min-width: 0; }
-.search-input-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text3); }
-.search-input {
-  width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 10px;
-  padding: 9px 32px 9px 32px; color: var(--text); font-size: 14px; font-family: var(--font-body);
-}
-.search-input:focus { border-color: var(--accent); outline: none; }
-.search-clear {
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px;
-  border-radius: 50%; background: var(--bg2); color: var(--text2); border: none; font-size: 13px;
-  display: none; align-items: center; justify-content: center; cursor: pointer; line-height: 1;
-}
-.search-input:not(:placeholder-shown) ~ .search-clear { display: flex; }
-.search-filter-select {
-  flex: none; background: var(--bg3); border: 1px solid var(--border2); border-radius: 10px;
-  padding: 9px 28px 9px 12px; color: var(--text); font-size: 13px; font-family: var(--font-body); max-width: 42%;
-}
-.search-filter-select:focus { border-color: var(--accent); outline: none; }
-.search-empty-hint { text-align: center; padding: 40px 20px; color: var(--text3); font-size: 13px; }
-
 /* ── SCREENS ── */
 .screen { position: absolute; inset: 0; display: none; flex-direction: column; }
 .screen.active { display: flex; }
@@ -663,6 +641,17 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .set-order-row:first-child{border-top:none}
 .set-mini{width:34px;height:30px;border-radius:8px;border:1px solid var(--border2,#334155);background:var(--bg1,#0f172a);color:var(--text);font-size:14px;margin-left:6px}
 .set-mini:disabled{opacity:.3}
+.tpl-bar{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;-webkit-overflow-scrolling:touch}
+.tpl-bar:empty{display:none}
+.tpl-card{flex:0 0 auto;width:78px;background:var(--bg2,#1e293b);border:1px solid var(--border2,#334155);border-radius:10px;padding:6px;text-align:center;cursor:pointer}
+.tpl-card:active{border-color:var(--accent)}
+.tpl-thumb{width:64px;height:48px;border-radius:6px;object-fit:cover;background:var(--bg1,#0f172a);display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto}
+.tpl-name{font-size:10px;color:var(--text);margin-top:5px;line-height:1.2;max-height:24px;overflow:hidden}
+.tpl-add{border-style:dashed;color:var(--accent)}
+.tpl-add .tpl-thumb{font-size:26px;color:var(--accent)}
+.set-tpl-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border2,#334155)}
+.set-tpl-row:first-child{border-top:none}
+.set-tpl-thumb{width:52px;height:40px;border-radius:6px;object-fit:cover;background:var(--bg1,#0f172a);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:18px}
 .map-filter{position:absolute;top:calc(env(safe-area-inset-top) + 64px);left:10px;z-index:800;max-width:58%;background:rgba(15,23,42,.9);backdrop-filter:blur(8px);color:var(--text);border:1px solid var(--border2);border-radius:999px;padding:8px 12px;font-size:13px;-webkit-appearance:none;appearance:none}
 .map-filter.active{border-color:var(--accent);color:var(--accent)}
 </style>
@@ -823,13 +812,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round"><path d="M9 3v12M3 9h12"/></svg>
     </div>
   </div>
-  <div class="search-bar">
-    <div class="search-input-wrap">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-      <input class="search-input" id="list-search" type="text" inputmode="search" placeholder="Rechercher un point (ID, type, techno…)" oninput="window._listLimit = 300; renderList()">
-      <button class="search-clear" type="button" onclick="document.getElementById('list-search').value='';window._listLimit=300;renderList();">✕</button>
-    </div>
-  </div>
   <div class="list-scroll" id="list-scroll"></div>
 </div>
 
@@ -849,6 +831,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
   </div>
   <div class="form-scroll">
+
+    <div class="tpl-bar" id="tpl-bar"></div>
 
     <div class="form-section-title">Localisation GPS</div>
     <div class="form-row">
@@ -1066,20 +1050,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 1v12M1 7h12"/></svg>
       Ajouter
     </button>
-  </div>
-  <div class="search-bar">
-    <div class="search-input-wrap">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-      <input class="search-input" id="arm-search" type="text" inputmode="search" placeholder="Rechercher une armoire (ID, câble…)" oninput="renderArmoires()">
-      <button class="search-clear" type="button" onclick="document.getElementById('arm-search').value='';renderArmoires();">✕</button>
-    </div>
-    <select class="search-filter-select" id="arm-filter-etat" onchange="renderArmoires()">
-      <option value="">Tous les états</option>
-      <option value="Bon">Bon</option>
-      <option value="Moyen">Moyen</option>
-      <option value="Mauvais">Mauvais</option>
-      <option value="À remplacer">À remplacer</option>
-    </select>
   </div>
   <div class="list-scroll" id="armoires-scroll"></div>
 </div>
@@ -1626,9 +1596,6 @@ function showToast(msg, type='') {
 const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => _escMap[c]);
-}
-function searchNorm(v) {
-  return String(v == null ? '' : v).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 // ── STOCKAGE LOCAL (IndexedDB) ──
@@ -2196,6 +2163,7 @@ function showForm(pt) {
     const el = document.getElementById('cf-' + cf.key);
     if (el) el.value = (pt && pt.custom && pt.custom[cf.column] != null) ? pt.custom[cf.column] : '';
   });
+  renderTemplatesBar();
 
   // datalist des armoires déjà saisies
   const dl = document.getElementById('armoire-list');
@@ -2416,26 +2384,12 @@ function generateArmoireId() {
 function renderArmoires() {
   const scroll = document.getElementById('armoires-scroll');
   const sub = document.getElementById('armoires-sub');
-  const searchEl = document.getElementById('arm-search');
-  const filterEl = document.getElementById('arm-filter-etat');
-  const q = searchEl ? searchNorm(searchEl.value.trim()) : '';
-  const etatFilter = filterEl ? filterEl.value : '';
-  let source = state.armoires;
-  if (etatFilter) source = source.filter(a => a.etatExt === etatFilter);
-  if (q) {
-    source = source.filter(a => {
-      const hay = searchNorm([a.id, a.cable, a.observations, a.departs, a.protection, a.horloge, a.abonnement].join(' '));
-      return hay.includes(q);
-    });
-  }
-  sub.textContent = (q || etatFilter ? source.length + ' / ' + state.armoires.length : state.armoires.length) + ' armoire' + (state.armoires.length > 1 ? 's' : '');
-  if (!source.length) {
-    scroll.innerHTML = (q || etatFilter)
-      ? `<div class="search-empty-hint">Aucune armoire ne correspond${q ? ' à « ' + escapeHtml(searchEl.value.trim()) + ' »' : ''}${etatFilter ? ' (état : ' + escapeHtml(etatFilter) + ')' : ''}</div>`
-      : '<div style="text-align:center;padding:40px 20px;color:var(--text3)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" style="opacity:.3;margin-bottom:12px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><div>Aucune armoire enregistrée</div><div style="font-size:12px;margin-top:6px">Appuyez sur « Ajouter » pour commencer</div></div>';
+  sub.textContent = state.armoires.length + ' armoire' + (state.armoires.length > 1 ? 's' : '');
+  if (!state.armoires.length) {
+    scroll.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--text3)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" style="opacity:.3;margin-bottom:12px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><div>Aucune armoire enregistrée</div><div style="font-size:12px;margin-top:6px">Appuyez sur « Ajouter » pour commencer</div></div>';
     return;
   }
-  scroll.innerHTML = source.map(arm => {
+  scroll.innerHTML = state.armoires.map(arm => {
     const nbPts = state.points.filter(p => p.idArmoire === arm.id).length;
     const etatColor = arm.etatExt === 'Bon' ? '#4ade80' : arm.etatExt === 'Moyen' ? '#facc15' : arm.etatExt ? '#f87171' : '#64748b';
     return `<div class="armoire-item" onclick="showArmoireForm(state.armoires.find(a=>a.id==='${arm.id}'))">
@@ -2601,7 +2555,6 @@ function deleteArmoireFromMap(id) {
   map.closePopup();
   state.armoires = state.armoires.filter(a => a.id !== id);
   ARM_PHOTO_TYPES.forEach(k => { DB.del('photos', id + '__' + k).catch(() => {}); DB.del('photoQueue', id + '__' + k).catch(() => {}); });
-  try { DB.put('tombstones', { id, ts: Date.now() }); } catch (e) {}
   saveLocalArmoires();
   refreshMapMarkers();
   sendDeleteToSheets('Armoires', id).then(ok => {
@@ -2611,25 +2564,15 @@ function deleteArmoireFromMap(id) {
 
 function renderList() {
   const scroll = document.getElementById('list-scroll');
-  const searchEl = document.getElementById('list-search');
-  const q = searchEl ? searchNorm(searchEl.value.trim()) : '';
-  const source = q
-    ? state.points.filter(pt => {
-        const hay = searchNorm([pt.id, pt.typeSupport, pt.technologie, pt.etatSupport, pt.puissance, pt.typeLuminaire, pt.idArmoire, pt.hauteur].join(' '));
-        return hay.includes(q);
-      })
-    : state.points;
-  document.getElementById('list-sub').textContent = (q ? source.length + ' / ' + state.points.length : state.points.length) + ' points · ' + state.chantier;
-  if (!source.length) {
-    scroll.innerHTML = q
-      ? `<div class="search-empty-hint">Aucun point ne correspond à « ${escapeHtml(searchEl.value.trim())} »</div>`
-      : `<div class="empty-state"><div class="empty-icon"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#94a3b8" stroke-width="1.5"><circle cx="24" cy="24" r="20"/><path d="M24 14v10l6 6"/></svg></div><div class="empty-text">Aucun point relevé<br>sur ce chantier</div></div>`;
+  document.getElementById('list-sub').textContent = state.points.length + ' points · ' + state.chantier;
+  if (!state.points.length) {
+    scroll.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#94a3b8" stroke-width="1.5"><circle cx="24" cy="24" r="20"/><path d="M24 14v10l6 6"/></svg></div><div class="empty-text">Aucun point relevé<br>sur ce chantier</div></div>`;
     return;
   }
   const LIST_PAGE = 300;
   if (!window._listLimit) window._listLimit = LIST_PAGE;
-  const visible = source.slice(0, window._listLimit);
-  const rest = source.length - visible.length;
+  const visible = state.points.slice(0, window._listLimit);
+  const rest = state.points.length - visible.length;
   scroll.innerHTML = visible.map(pt => `
     <div class="list-item" onclick="showForm(state.points.find(p=>p.id==='${pt.id}'))">
       <div class="list-item-dot" style="background:${getMarkerColor(pt)}"></div>
@@ -2701,7 +2644,8 @@ const CONFIG_DEFAULT = {
   armCustomFields: [],  // champs personnalisés des armoires (onglet Armoires)
   colors: { 'Bon': '#4ade80', 'Moyen': '#facc15', 'Mauvais': '#f87171', 'À remplacer': '#f87171', '_default': '#38bdf8' },
   orderPL: [],    // ordre des champs de la fiche point (vide = ordre d'origine)
-  orderARM: []    // ordre des champs de la fiche armoire
+  orderARM: [],   // ordre des champs de la fiche armoire
+  templates: []   // trames de fiche : { key, name, thumb, values, custom }
 };
 // Correspondance : clé config → <select> du formulaire → libellé lisible
 const LIST_FIELDS = [
@@ -2731,7 +2675,8 @@ async function loadConfig() {
         armCustomFields: Array.isArray(rec.v.armCustomFields) ? rec.v.armCustomFields : [],
         colors: Object.assign({}, CONFIG_DEFAULT.colors, rec.v.colors || {}),
         orderPL: Array.isArray(rec.v.orderPL) ? rec.v.orderPL : [],
-        orderARM: Array.isArray(rec.v.orderARM) ? rec.v.orderARM : []
+        orderARM: Array.isArray(rec.v.orderARM) ? rec.v.orderARM : [],
+        templates: Array.isArray(rec.v.templates) ? rec.v.templates : []
       };
     }
   } catch (e) {}
@@ -2743,6 +2688,7 @@ async function loadConfig() {
   if (!CONFIG.colors) CONFIG.colors = Object.assign({}, CONFIG_DEFAULT.colors);
   if (!Array.isArray(CONFIG.orderPL)) CONFIG.orderPL = [];
   if (!Array.isArray(CONFIG.orderARM)) CONFIG.orderARM = [];
+  if (!Array.isArray(CONFIG.templates)) CONFIG.templates = [];
   applyConfig();
 }
 async function saveConfig() {
@@ -2775,6 +2721,8 @@ function applyConfig() {
   renderArmCustomFields();
   // 5) ordre des champs dans les deux fiches
   applyFieldOrder();
+  // 6) bandeau des trames de la fiche point
+  renderTemplatesBar();
 }
 // Rend les champs personnalisés dans le formulaire point lumineux
 function renderCustomFields() {
@@ -2897,6 +2845,84 @@ function moveField(which, idx, dir) {
   renderSettings();
 }
 
+/* ═══════════ TRAMES DE FICHE (préremplissage en un tap) ═══════════ */
+// Champs capturés/appliqués par une trame (l'ID armoire, la précision, le GPS
+// et les observations restent propres à chaque point).
+const TPL_FIELDS = ['f-nbr-supports','f-type-support','f-etat-support','f-hauteur',
+  'f-type-attache','f-nbr-luminaires','f-type-luminaire','f-etat-luminaire',
+  'f-technologie','f-puissance'];
+
+function renderTemplatesBar() {
+  const bar = document.getElementById('tpl-bar');
+  if (!bar) return;
+  let html = (CONFIG.templates || []).map((t, i) => `
+    <div class="tpl-card" onclick="applyTemplate(${i})">
+      ${t.thumb ? `<img class="tpl-thumb" src="${t.thumb}" alt="">` : `<div class="tpl-thumb">💡</div>`}
+      <div class="tpl-name">${escapeHtml(t.name)}</div>
+    </div>`).join('');
+  html += `
+    <div class="tpl-card tpl-add" onclick="saveFormAsTemplate()">
+      <div class="tpl-thumb">＋</div>
+      <div class="tpl-name">Trame depuis la fiche</div>
+    </div>`;
+  bar.innerHTML = html;
+}
+function applyTemplate(i) {
+  const t = (CONFIG.templates || [])[i];
+  if (!t) return;
+  Object.entries(t.values || {}).forEach(([id, v]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v;
+  });
+  Object.entries(t.custom || {}).forEach(([col, v]) => {
+    const el = document.querySelector('#custom-fields-pl [data-col="' + CSS.escape(col) + '"]');
+    if (el) el.value = v;
+  });
+  showToast('Trame « ' + t.name + ' » appliquée', 'success');
+}
+function saveFormAsTemplate() {
+  const name = (prompt('Nom de la trame (ex : Mât droit 8m LED) :') || '').trim();
+  if (!name) return;
+  const values = {};
+  TPL_FIELDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value) values[id] = el.value;
+  });
+  const custom = {};
+  Object.entries(readCustomFields()).forEach(([col, v]) => { if (v) custom[col] = v; });
+  if (!Object.keys(values).length && !Object.keys(custom).length) {
+    showToast('Remplis d\u2019abord la fiche avec les valeurs de la trame', 'error');
+    return;
+  }
+  CONFIG.templates.push({ key: slugify(name) + '_' + Date.now(), name, thumb: null, values, custom });
+  saveConfig();
+  renderTemplatesBar();
+  showToast('Trame « ' + name + ' » créée — photo ajoutable dans Réglages', 'success');
+}
+function deleteTemplate(i) {
+  const t = CONFIG.templates[i];
+  if (!confirm('Supprimer la trame « ' + t.name + ' » ?')) return;
+  CONFIG.templates.splice(i, 1);
+  saveConfig(); renderSettings();
+}
+function tplPhotoChanged(i, input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    const scale = Math.min(1, 160 / img.width);
+    c.width = Math.round(img.width * scale);
+    c.height = Math.round(img.height * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    CONFIG.templates[i].thumb = c.toDataURL('image/jpeg', 0.7);
+    URL.revokeObjectURL(img.src);
+    saveConfig(); renderSettings();
+    showToast('Photo de trame mise à jour', 'success');
+  };
+  img.src = URL.createObjectURL(file);
+}
+
 /* ═══════════ PAGE RÉGLAGES : rendu + édition ═══════════ */
 function renderSettings() {
   const box = document.getElementById('settings-body');
@@ -2938,6 +2964,28 @@ function renderSettings() {
     </div>
     <button class="set-btn" onclick="addCustomField()">Créer le champ</button>
   </div>`;
+
+  html += '<div class="set-section-title">Trames de fiche (point lumineux)</div>';
+  html += '<div class="set-card">';
+  if (!(CONFIG.templates || []).length) {
+    html += '<div class="set-empty">Aucune trame. Dans une fiche point, remplis les champs types puis touche « ＋ Trame depuis la fiche ».</div>';
+  } else {
+    CONFIG.templates.forEach((t, i) => {
+      const nb = Object.keys(t.values || {}).length + Object.keys(t.custom || {}).length;
+      html += `<div class="set-tpl-row">
+        ${t.thumb ? `<img class="set-tpl-thumb" src="${t.thumb}" alt="">` : `<div class="set-tpl-thumb">💡</div>`}
+        <div style="flex:1;min-width:0">
+          <div class="set-color-label" style="font-weight:600">${escapeHtml(t.name)}</div>
+          <div class="set-empty">${nb} caractéristique${nb > 1 ? 's' : ''}</div>
+        </div>
+        <label class="set-mini" style="display:flex;align-items:center;justify-content:center;cursor:pointer">📷
+          <input type="file" accept="image/*" style="display:none" onchange="tplPhotoChanged(${i}, this)">
+        </label>
+        <button class="set-mini" style="color:#f87171;border-color:#f87171" onclick="deleteTemplate(${i})">🗑</button>
+      </div>`;
+    });
+  }
+  html += '</div>';
 
   html += '<div class="set-section-title">Ordre des champs dans les fiches</div>';
   [['PL', 'Fiche point lumineux', PL_ORDER_DEFS, CONFIG.orderPL], ['ARM', 'Fiche armoire', ARM_ORDER_DEFS, CONFIG.orderARM]].forEach(([which, title, defs, saved]) => {
@@ -3248,35 +3296,6 @@ function mapServerRow(r) {
     photos: {}
   };
 }
-// ── Traduit une ligne du Sheet "Armoires" en objet armoire local ──
-function mapServerArmoire(r) {
-  const custom = {};
-  (CONFIG.armCustomFields || []).forEach(cf => {
-    if (r[cf.column] !== undefined) custom[cf.column] = r[cf.column];
-  });
-  const photosStr = String(r['Photos'] || '');
-  const photoList = photosStr.split(',').map(s => s.trim()).filter(Boolean);
-  const photos = {};
-  ARM_PHOTO_TYPES.forEach(t => { photos[t] = photoList.includes(t); });
-  return {
-    id: String(r['ID'] || ''),
-    etatExt: r["État Ext de l'armoire"] || '',
-    etatInt: r["État Int de l'armoire"] || '',
-    abonnement: r['Abonnement (kVA)'] || '',
-    cable: r["Câble d'alimentation"] || '',
-    departs: r['Départs'] || '',
-    protection: r['Protection'] || '',
-    horloge: r['Horloge'] || '',
-    observations: r['Observations'] || '',
-    lng: parseFloat(r['Longitude']) || null,
-    lat: parseFloat(r['Latitude']) || null,
-    chantier: r['Chantier'] || '',
-    technicien: r['Technicien'] || '',
-    date: r['Date'] || '',
-    custom: custom,
-    photos: photos
-  };
-}
 // ── Polling automatique : reflète les modifs faites dans le Sheet (ajouts ET suppressions) ──
 let pollTimer = null, isLoading = false;
 function startPolling() {
@@ -3323,13 +3342,8 @@ async function loadFromSheets(silent) {
       const byId = new Map(state.points.map(p => [String(p.id), p]));
       let tombstones = new Set();
       try { tombstones = new Set((await DB.all('tombstones')).map(t => t.id)); } catch (e) {}
-      let queueRows = [];
-      try { queueRows = await DB.all('queue'); } catch (e) {}
-      let pendingIds = new Set(queueRows.map(q => String(q.id)));
-      let pendingArmIds = new Set(
-        queueRows.filter(q => q.kind === 'armoire')
-          .map(q => String((q.pt && q.pt.id) || String(q.id).replace(/^arm__/, '')))
-      );
+      let pendingIds = new Set();
+      try { pendingIds = new Set((await DB.all('queue')).map(q => String(q.id))); } catch (e) {}
 
       // 1) Ajouts : points du serveur absents en local (hors supprimés/tombstones)
       let added = 0;
@@ -3378,62 +3392,11 @@ async function loadFromSheets(silent) {
         refreshMapMarkers();
       }
 
-      // ── ARMOIRES : même logique add/update/remove que les points ci-dessus ──
-      // (jusqu'ici l'appli ne rapatriait JAMAIS les armoires du Sheet, seulement l'inverse)
-      let armAdded = 0, armUpdated = 0, armRemoved = 0;
-      try {
-        const armUrl = SCRIPT_URL + '?sheet=Armoires&chantier=' + encodeURIComponent(state.chantier);
-        const armRes = await fetch(armUrl);
-        const armData = await armRes.json();
-        if (armData.error) throw new Error(armData.error);
-
-        const armById = new Map(state.armoires.map(a => [String(a.id), a]));
-
-        (armData.rows || []).forEach(r => {
-          const id = String(r['ID'] || '');
-          if (!id || armById.has(id) || tombstones.has(id)) return;
-          armById.set(id, mapServerArmoire(r));
-          armAdded++;
-        });
-
-        (armData.rows || []).forEach(r => {
-          const id = String(r['ID'] || '');
-          if (!id || tombstones.has(id) || pendingArmIds.has(id)) return;
-          const existing = armById.get(id);
-          if (!existing) return;
-          const fresh = mapServerArmoire(r);
-          fresh.photos = existing.photos; // indicateurs photos gérés en local, pas dans le Sheet
-          const changed = JSON.stringify(fresh) !== JSON.stringify(Object.assign({}, existing, { photos: fresh.photos }));
-          if (changed) { armById.set(id, fresh); armUpdated++; }
-        });
-
-        const armServerIds = new Set((armData.rows || []).map(r => String(r['ID'] || '')));
-        for (const a of [...armById.values()]) {
-          const aid = String(a.id);
-          if (String(a.chantier) === String(state.chantier) && !armServerIds.has(aid) && !pendingArmIds.has(aid)) {
-            armById.delete(aid);
-            armRemoved++;
-          }
-        }
-
-        if (armAdded || armUpdated || armRemoved) {
-          state.armoires = [...armById.values()];
-          saveLocalArmoires();
-          refreshMapMarkers();
-          renderArmoires();
-        }
-      } catch (e) {
-        console.error('Load armoires error:', e);
-      }
-
       if (removed) showToast(removed + ' point' + (removed > 1 ? 's' : '') + ' retiré' + (removed > 1 ? 's' : '') + ' (supprimé du Sheet)', '');
-      else if (added || updated || armAdded || armUpdated || armRemoved) {
+      else if (added || updated) {
         const parts = [];
-        if (added) parts.push(added + ' point' + (added > 1 ? 's' : '') + ' ajouté' + (added > 1 ? 's' : ''));
-        if (updated) parts.push(updated + ' point' + (updated > 1 ? 's' : '') + ' mis à jour');
-        if (armAdded) parts.push(armAdded + ' armoire' + (armAdded > 1 ? 's' : '') + ' ajoutée' + (armAdded > 1 ? 's' : ''));
-        if (armUpdated) parts.push(armUpdated + ' armoire' + (armUpdated > 1 ? 's' : '') + ' mise' + (armUpdated > 1 ? 's' : '') + ' à jour');
-        if (armRemoved) parts.push(armRemoved + ' armoire' + (armRemoved > 1 ? 's' : '') + ' retirée' + (armRemoved > 1 ? 's' : ''));
+        if (added) parts.push(added + ' ajouté' + (added > 1 ? 's' : ''));
+        if (updated) parts.push(updated + ' mis à jour');
         showToast(parts.join(' · ') + ' ✓', 'success');
       }
       else if (!silent) showToast('À jour ✓', 'success');
