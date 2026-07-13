@@ -45,6 +45,28 @@
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-body); }
 
+/* ── Barre de recherche / filtre (onglets Liste & Armoires) ── */
+.search-bar { display: flex; gap: 8px; padding: 10px 14px; background: var(--bg); border-bottom: 1px solid var(--border); flex: none; }
+.search-input-wrap { position: relative; flex: 1; min-width: 0; }
+.search-input-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text3); }
+.search-input {
+  width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 10px;
+  padding: 9px 32px 9px 32px; color: var(--text); font-size: 14px; font-family: var(--font-body);
+}
+.search-input:focus { border-color: var(--accent); outline: none; }
+.search-clear {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px;
+  border-radius: 50%; background: var(--bg2); color: var(--text2); border: none; font-size: 13px;
+  display: none; align-items: center; justify-content: center; cursor: pointer; line-height: 1;
+}
+.search-input:not(:placeholder-shown) ~ .search-clear { display: flex; }
+.search-filter-select {
+  flex: none; background: var(--bg3); border: 1px solid var(--border2); border-radius: 10px;
+  padding: 9px 28px 9px 12px; color: var(--text); font-size: 13px; font-family: var(--font-body); max-width: 42%;
+}
+.search-filter-select:focus { border-color: var(--accent); outline: none; }
+.search-empty-hint { text-align: center; padding: 40px 20px; color: var(--text3); font-size: 13px; }
+
 /* ── SCREENS ── */
 .screen { position: absolute; inset: 0; display: none; flex-direction: column; }
 .screen.active { display: flex; }
@@ -141,6 +163,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   font-weight: 500;
   color: var(--accent);
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
 .icon-btn {
   width: 36px; height: 36px;
@@ -582,6 +605,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .sync-btn:active{opacity:.8}
 .sync-btn:disabled{opacity:.45;pointer-events:none}
 .sync-btn.spinning svg{animation:sync-spin .8s linear infinite}
+.undo-btn{position:relative}
+.undo-count{position:absolute;top:-3px;right:-3px;background:#a78bfa;color:#0f172a;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:999px;display:none;align-items:center;justify-content:center;padding:0 3px;font-family:var(--font-mono);line-height:1}
 @keyframes sync-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .precision-row{display:flex;gap:8px;align-items:center;margin-top:8px}
 .precision-row .form-select{flex:1;margin:0}
@@ -637,6 +662,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .set-color-row:first-child{border-top:none}
 .set-color-label{font-size:13px;color:var(--text)}
 .set-color{width:46px;height:30px;border:none;background:none;padding:0;cursor:pointer}
+.set-color-pair{display:flex;align-items:center;gap:4px;flex:none}
 .set-order-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border2,#334155)}
 .set-order-row:first-child{border-top:none}
 .set-mini{width:34px;height:30px;border-radius:8px;border:1px solid var(--border2,#334155);background:var(--bg1,#0f172a);color:var(--text);font-size:14px;margin-left:6px}
@@ -672,8 +698,15 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   Mode hors-ligne — données sauvegardées localement
 </div>
 
-<!-- BARRE D'ÉTAT (online/offline + sync en attente) + bouton sync manuel -->
+<!-- BARRE D'ÉTAT (online/offline + sync en attente) + boutons annuler/sync manuel -->
 <div class="topbar-actions">
+  <button class="sync-btn undo-btn" id="undo-btn" onclick="undoLast()" title="Annuler la dernière action" type="button" disabled>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 14L4 9l5-5"></path>
+      <path d="M4 9h10.5a5.5 5.5 0 015.5 5.5v0a5.5 5.5 0 01-5.5 5.5H11"></path>
+    </svg>
+    <span class="undo-count" id="undo-count">0</span>
+  </button>
   <button class="sync-btn" id="sync-btn" onclick="manualSync()" title="Synchroniser avec le Sheet" type="button">
     <svg id="sync-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="23 4 23 10 17 10"></polyline>
@@ -815,6 +848,13 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
     <div class="icon-btn" onclick="showForm(null)">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round"><path d="M9 3v12M3 9h12"/></svg>
+    </div>
+  </div>
+  <div class="search-bar">
+    <div class="search-input-wrap">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input class="search-input" id="list-search" type="text" inputmode="search" placeholder="Rechercher un point (ID, type, techno…)" oninput="window._listLimit = 300; renderList()">
+      <button class="search-clear" type="button" onclick="document.getElementById('list-search').value='';window._listLimit=300;renderList();">✕</button>
     </div>
   </div>
   <div class="list-scroll" id="list-scroll"></div>
@@ -1054,6 +1094,20 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 1v12M1 7h12"/></svg>
       Ajouter
     </button>
+  </div>
+  <div class="search-bar">
+    <div class="search-input-wrap">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input class="search-input" id="arm-search" type="text" inputmode="search" placeholder="Rechercher une armoire (ID, câble…)" oninput="renderArmoires()">
+      <button class="search-clear" type="button" onclick="document.getElementById('arm-search').value='';renderArmoires();">✕</button>
+    </div>
+    <select class="search-filter-select" id="arm-filter-etat" onchange="renderArmoires()">
+      <option value="">Tous les états</option>
+      <option value="Bon">Bon</option>
+      <option value="Moyen">Moyen</option>
+      <option value="Mauvais">Mauvais</option>
+      <option value="À remplacer">À remplacer</option>
+    </select>
   </div>
   <div class="list-scroll" id="armoires-scroll"></div>
 </div>
@@ -1579,12 +1633,78 @@ let state = {
 let currentGPSAccuracy = null;
 let currentSourcePosition = '';
 
+// ── ANNULER (Ctrl+Z) — pile des dernières actions modifiant/supprimant des points ──
+// Chaque entrée { id, before } où before = clone du point AVANT l'action (null si le
+// point n'existait pas avant, càd l'action l'a créé → annuler = le supprimer à nouveau).
+// Limité à la session en cours (non persisté) et aux N dernières actions.
+const undoStack = [];
+const UNDO_MAX = 20;
+function cloneEntry(pt) { return pt ? JSON.parse(JSON.stringify(pt)) : null; }
+function pushUndo(label, entries) {
+  undoStack.push({ label, entries, ts: Date.now() });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  updateUndoButton();
+}
+function updateUndoButton() {
+  const btn = document.getElementById('undo-btn');
+  const badge = document.getElementById('undo-count');
+  if (!btn) return;
+  btn.disabled = undoStack.length === 0;
+  if (undoStack.length) {
+    badge.textContent = undoStack.length;
+    badge.style.display = 'flex';
+    btn.title = 'Annuler : ' + undoStack[undoStack.length - 1].label;
+  } else {
+    badge.style.display = 'none';
+    btn.title = 'Annuler la dernière action';
+  }
+}
+async function undoLast() {
+  if (!undoStack.length) { showToast('Rien à annuler', ''); return; }
+  const action = undoStack.pop();
+  updateUndoButton();
+  const btn = document.getElementById('undo-btn');
+  btn.disabled = true;
+  showToast('Annulation : ' + action.label + '…', '');
+  try {
+    for (const entry of action.entries) {
+      const idx = state.points.findIndex(p => p.id === entry.id);
+      if (entry.before === null) {
+        // Le point n'existait pas avant cette action → on le retire à nouveau
+        if (idx >= 0) state.points.splice(idx, 1);
+        try { await DB.del('points', entry.id); } catch (e) {}
+        try { await DB.put('tombstones', { id: entry.id, ts: Date.now() }); } catch (e) {}
+        await sendDeleteToSheets('Points Lumineux', entry.id);
+      } else {
+        // Restaure l'état exact d'avant (coordonnées, champs modifiés, etc.)
+        if (idx >= 0) state.points[idx] = entry.before; else state.points.push(entry.before);
+        try { await DB.del('tombstones', entry.id); } catch (e) {} // au cas où c'était une suppression
+        await syncPointToSheets(entry.before);
+      }
+    }
+    saveLocal();
+    refreshMapMarkers(); renderList(); renderPanier(); updateStatus();
+    showToast('Annulé : ' + action.label + ' ✓', 'success');
+  } catch (e) {
+    console.error('undo', e);
+    showToast('⚠ Erreur pendant l\'annulation', 'error');
+  } finally {
+    updateUndoButton();
+  }
+}
+
 // ── OFFLINE ──
 function updateOfflineBanner() {
   document.getElementById('offline-banner').classList.toggle('show', !navigator.onLine);
 }
 window.addEventListener('online', updateOfflineBanner);
 window.addEventListener('offline', updateOfflineBanner);
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    undoLast();
+  }
+});
 
 // ── TOAST ──
 function showToast(msg, type='') {
@@ -1602,6 +1722,9 @@ function showToast(msg, type='') {
 const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => _escMap[c]);
+}
+function searchNorm(v) {
+  return String(v == null ? '' : v).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 // ── STOCKAGE LOCAL (IndexedDB) ──
@@ -1890,11 +2013,13 @@ function finishLasso() {
 }
 
 function getMarkerColor(pt) {
-  if (pt.dansPanier) return '#fb923c';
   const colors = (CONFIG && CONFIG.colors) || {};
-  const etat = pt.etatSupport || '';
-  if (etat && colors[etat]) return colors[etat];
-  return colors._default || '#38bdf8';
+  const dfl = colors._default || { fill: '#38bdf8', border: '#ffffff' };
+  if (pt.dansPanier) return { fill: '#fb923c', border: '#ffffff' };
+  const field = (CONFIG && CONFIG.colorField) || 'etatSupport';
+  const val = pt[field] || '';
+  if (val && colors[val]) return colors[val];
+  return dfl;
 }
 
 // \u2500\u2500 Filtre de la carte par armoire \u2500\u2500
@@ -1946,7 +2071,7 @@ function refreshMapMarkers() {
     const color = getMarkerColor(pt);
     const icon = L.divIcon({
       className: '',
-      html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>`,
+      html: `<div style="width:14px;height:14px;border-radius:50%;background:${color.fill};border:2px solid ${color.border};box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>`,
       iconSize: [14,14], iconAnchor: [7,7]
     });
     const marker = L.marker([pt.lat, pt.lng], { icon });
@@ -1996,7 +2121,9 @@ function refreshMapMarkers() {
   const shown = state.filterArmoire
     ? state.points.filter(p => String(p.idArmoire) === state.filterArmoire && p.lat && p.lng).length
     : state.points.length;
-  document.getElementById('map-count-badge').textContent = state.filterArmoire ? (shown + ' pts (filtr\u00e9)') : (shown + ' pts');
+  const ptsLabel = state.filterArmoire ? (shown + ' pts (filtré)') : (shown + ' pts');
+  const armLabel = state.armoires.length + ' arm.';
+  document.getElementById('map-count-badge').textContent = ptsLabel + ' · ' + armLabel;
 }
 
 function centerOnMe() {
@@ -2055,9 +2182,11 @@ async function confirmMarkerMove(marker, id) {
   const { lat, lng } = marker.getLatLng();
   const pt = state.points.find(p => p.id === id);
   if (!pt) { refreshMapMarkers(); return; }
+  const before = cloneEntry(pt);
   pt.lat = lat;
   pt.lng = lng;
   pt.sourcePosition = 'Ajustement manuel (carte)';
+  pushUndo('Déplacement ' + id, [{ id, before }]);
   saveLocal();
   refreshMapMarkers();
   updateStatus();
@@ -2102,11 +2231,13 @@ async function confirmArmoireMove(marker, id) {
 async function deletePointLocal(id) {
   const idx = state.points.findIndex(p => p.id === id);
   if (idx === -1) return;
+  const before = cloneEntry(state.points[idx]);
   state.points.splice(idx, 1);
   try { await DB.del('points', id); } catch (e) {}
   try { await DB.del('queue', id); } catch (e) {}
   try { await DB.put('tombstones', { id, ts: Date.now() }); } catch (e) {}
   for (const t of PHOTO_TYPES) { try { await DB.del('photos', id + '__' + t); } catch (e) {} try { await DB.del('photoQueue', id + '__' + t); } catch (e) {} }
+  pushUndo('Suppression ' + id, [{ id, before }]);
   refreshMapMarkers();
   renderList();
   renderPanier();
@@ -2304,12 +2435,14 @@ async function savePoint() {
       }
     }
   } catch (e) { console.error('photo save', e); showToast('⚠ Échec sauvegarde photo', 'error'); }
+  const existingIdx = editingId ? state.points.findIndex(p => p.id === editingId) : -1;
+  const before = existingIdx >= 0 ? cloneEntry(state.points[existingIdx]) : null;
   if (editingId) {
-    const idx = state.points.findIndex(p => p.id === editingId);
-    if (idx >= 0) state.points[idx] = data; else state.points.push(data);
+    if (existingIdx >= 0) state.points[existingIdx] = data; else state.points.push(data);
   } else {
     state.points.push(data);
   }
+  pushUndo((before ? 'Modification ' : 'Ajout ') + data.id, [{ id: data.id, before }]);
   currentGPSLat = null; currentGPSLng = null; currentGPSAccuracy = null; currentSourcePosition = '';
   saveLocal();
   await syncPointToSheets(data);
@@ -2387,12 +2520,26 @@ function generateArmoireId() {
 function renderArmoires() {
   const scroll = document.getElementById('armoires-scroll');
   const sub = document.getElementById('armoires-sub');
-  sub.textContent = state.armoires.length + ' armoire' + (state.armoires.length > 1 ? 's' : '');
-  if (!state.armoires.length) {
-    scroll.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--text3)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" style="opacity:.3;margin-bottom:12px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><div>Aucune armoire enregistrée</div><div style="font-size:12px;margin-top:6px">Appuyez sur « Ajouter » pour commencer</div></div>';
+  const searchEl = document.getElementById('arm-search');
+  const filterEl = document.getElementById('arm-filter-etat');
+  const q = searchEl ? searchNorm(searchEl.value.trim()) : '';
+  const etatFilter = filterEl ? filterEl.value : '';
+  let source = state.armoires;
+  if (etatFilter) source = source.filter(a => a.etatExt === etatFilter);
+  if (q) {
+    source = source.filter(a => {
+      const hay = searchNorm([a.id, a.cable, a.observations, a.departs, a.protection, a.horloge, a.abonnement].join(' '));
+      return hay.includes(q);
+    });
+  }
+  sub.textContent = (q || etatFilter ? source.length + ' / ' + state.armoires.length : state.armoires.length) + ' armoire' + (state.armoires.length > 1 ? 's' : '');
+  if (!source.length) {
+    scroll.innerHTML = (q || etatFilter)
+      ? `<div class="search-empty-hint">Aucune armoire ne correspond${q ? ' à « ' + escapeHtml(searchEl.value.trim()) + ' »' : ''}${etatFilter ? ' (état : ' + escapeHtml(etatFilter) + ')' : ''}</div>`
+      : '<div style="text-align:center;padding:40px 20px;color:var(--text3)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" style="opacity:.3;margin-bottom:12px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><div>Aucune armoire enregistrée</div><div style="font-size:12px;margin-top:6px">Appuyez sur « Ajouter » pour commencer</div></div>';
     return;
   }
-  scroll.innerHTML = state.armoires.map(arm => {
+  scroll.innerHTML = source.map(arm => {
     const nbPts = state.points.filter(p => String(p.idArmoire || '').trim() === String(arm.id).trim()).length;
     const etatColor = arm.etatExt === 'Bon' ? '#4ade80' : arm.etatExt === 'Moyen' ? '#facc15' : arm.etatExt ? '#f87171' : '#64748b';
     return `<div class="armoire-item" onclick="showArmoireForm(state.armoires.find(a=>a.id==='${arm.id}'))">
@@ -2568,18 +2715,28 @@ function deleteArmoireFromMap(id) {
 
 function renderList() {
   const scroll = document.getElementById('list-scroll');
-  document.getElementById('list-sub').textContent = state.points.length + ' points · ' + state.chantier;
-  if (!state.points.length) {
-    scroll.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#94a3b8" stroke-width="1.5"><circle cx="24" cy="24" r="20"/><path d="M24 14v10l6 6"/></svg></div><div class="empty-text">Aucun point relevé<br>sur ce chantier</div></div>`;
+  const searchEl = document.getElementById('list-search');
+  const q = searchEl ? searchNorm(searchEl.value.trim()) : '';
+  const source = q
+    ? state.points.filter(pt => {
+        const hay = searchNorm([pt.id, pt.typeSupport, pt.technologie, pt.etatSupport, pt.puissance, pt.typeLuminaire, pt.idArmoire, pt.hauteur].join(' '));
+        return hay.includes(q);
+      })
+    : state.points;
+  document.getElementById('list-sub').textContent = (q ? source.length + ' / ' + state.points.length : state.points.length) + ' points · ' + state.chantier;
+  if (!source.length) {
+    scroll.innerHTML = q
+      ? `<div class="search-empty-hint">Aucun point ne correspond à « ${escapeHtml(searchEl.value.trim())} »</div>`
+      : `<div class="empty-state"><div class="empty-icon"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#94a3b8" stroke-width="1.5"><circle cx="24" cy="24" r="20"/><path d="M24 14v10l6 6"/></svg></div><div class="empty-text">Aucun point relevé<br>sur ce chantier</div></div>`;
     return;
   }
   const LIST_PAGE = 300;
   if (!window._listLimit) window._listLimit = LIST_PAGE;
-  const visible = state.points.slice(0, window._listLimit);
-  const rest = state.points.length - visible.length;
+  const visible = source.slice(0, window._listLimit);
+  const rest = source.length - visible.length;
   scroll.innerHTML = visible.map(pt => `
     <div class="list-item" onclick="showForm(state.points.find(p=>p.id==='${pt.id}'))">
-      <div class="list-item-dot" style="background:${getMarkerColor(pt)}"></div>
+      <div class="list-item-dot" style="background:${getMarkerColor(pt).fill};border:2px solid ${getMarkerColor(pt).border}"></div>
       <div class="list-item-info">
         <div class="list-item-id">${escapeHtml(pt.id)}</div>
         <div class="list-item-title">${escapeHtml(pt.typeSupport || 'Point lumineux')}</div>
@@ -2603,7 +2760,7 @@ function renderPanier() {
   }
   scroll.innerHTML = pts.map(pt => `
     <div class="list-item">
-      <div class="list-item-dot" style="background:${getMarkerColor(pt)}"></div>
+      <div class="list-item-dot" style="background:${getMarkerColor(pt).fill};border:2px solid ${getMarkerColor(pt).border}"></div>
       <div class="list-item-info">
         <div class="list-item-id">${escapeHtml(pt.id)}</div>
         <div class="list-item-title">${escapeHtml(pt.typeSupport || 'Point lumineux')}</div>
@@ -2646,7 +2803,14 @@ const CONFIG_DEFAULT = {
       options: ['Solaire faisable', 'Solaire infaisable', 'Solaire à projeter'] }
   ],
   armCustomFields: [],  // champs personnalisés des armoires (onglet Armoires)
-  colors: { 'Bon': '#4ade80', 'Moyen': '#facc15', 'Mauvais': '#f87171', 'À remplacer': '#f87171', '_default': '#38bdf8' },
+  colorField: 'etatSupport', // quel champ du point déclenche la couleur sur la carte
+  colors: {
+    'Bon': { fill: '#4ade80', border: '#ffffff' },
+    'Moyen': { fill: '#facc15', border: '#ffffff' },
+    'Mauvais': { fill: '#f87171', border: '#ffffff' },
+    'À remplacer': { fill: '#f87171', border: '#ffffff' },
+    '_default': { fill: '#38bdf8', border: '#ffffff' }
+  },
   orderPL: [],    // ordre des champs de la fiche point (vide = ordre d'origine)
   orderARM: [],   // ordre des champs de la fiche armoire
   templates: [],  // trames de fiche : { key, name, thumb, values, custom }
@@ -2678,6 +2842,7 @@ async function loadConfig() {
         lists: Object.assign({}, CONFIG_DEFAULT.lists, rec.v.lists || {}),
         customFields: Array.isArray(rec.v.customFields) ? rec.v.customFields : [],
         armCustomFields: Array.isArray(rec.v.armCustomFields) ? rec.v.armCustomFields : [],
+        colorField: rec.v.colorField || CONFIG_DEFAULT.colorField,
         colors: Object.assign({}, CONFIG_DEFAULT.colors, rec.v.colors || {}),
         orderPL: Array.isArray(rec.v.orderPL) ? rec.v.orderPL : [],
         orderARM: Array.isArray(rec.v.orderARM) ? rec.v.orderARM : [],
@@ -2691,7 +2856,14 @@ async function loadConfig() {
     if (!CONFIG.customFields.some(c => c.key === def.key)) CONFIG.customFields.push(def);
   });
   if (!Array.isArray(CONFIG.armCustomFields)) CONFIG.armCustomFields = [];
+  if (!CONFIG.colorField) CONFIG.colorField = CONFIG_DEFAULT.colorField;
   if (!CONFIG.colors) CONFIG.colors = Object.assign({}, CONFIG_DEFAULT.colors);
+  // Migration : anciennes couleurs stockées en simple string hex → {fill, border}
+  Object.keys(CONFIG.colors).forEach(k => {
+    if (typeof CONFIG.colors[k] === 'string') {
+      CONFIG.colors[k] = { fill: CONFIG.colors[k], border: '#ffffff' };
+    }
+  });
   if (!Array.isArray(CONFIG.orderPL)) CONFIG.orderPL = [];
   if (!Array.isArray(CONFIG.orderARM)) CONFIG.orderARM = [];
   if (!Array.isArray(CONFIG.templates)) CONFIG.templates = [];
@@ -3180,13 +3352,32 @@ function renderSettings() {
   });
 
   html += '<div class="set-section-title">Couleurs des points sur la carte</div>';
-  html += '<div class="set-card"><div class="set-empty" style="margin-bottom:6px">Selon l\u2019« État du support » de chaque point.</div>';
-  (CONFIG.lists.etatSupport || []).forEach((et, i) => {
-    const c = (CONFIG.colors && CONFIG.colors[et]) || (CONFIG.colors && CONFIG.colors._default) || '#38bdf8';
-    html += `<div class="set-color-row"><span class="set-color-label">${escapeHtml(et)}</span><input type="color" class="set-color" value="${c}" onchange="setStateColorByIndex(${i}, this.value)"></div>`;
+  html += '<div class="set-card">';
+  html += '<div class="set-color-row"><span class="set-color-label">Couleur déclenchée par</span>' +
+    '<select class="set-input" style="width:auto;flex:1;margin-left:8px" onchange="setColorField(this.value)">' +
+    LIST_FIELDS.map(f => `<option value="${f.key}"${CONFIG.colorField === f.key ? ' selected' : ''}>${escapeHtml(f.label)}</option>`).join('') +
+    '</select></div>';
+  const colorFieldDef = LIST_FIELDS.find(f => f.key === CONFIG.colorField) || LIST_FIELDS[1];
+  html += `<div class="set-empty" style="margin:6px 0 10px">Selon « ${escapeHtml(colorFieldDef.label)} » de chaque point — intérieur et contour réglables séparément.</div>`;
+  (CONFIG.lists[CONFIG.colorField] || []).forEach((val, i) => {
+    const c = (CONFIG.colors && CONFIG.colors[val]) || (CONFIG.colors && CONFIG.colors._default) || { fill: '#38bdf8', border: '#ffffff' };
+    html += `<div class="set-color-row">
+      <span class="set-color-label">${escapeHtml(val)}</span>
+      <span class="set-color-pair">
+        <input type="color" class="set-color" value="${c.fill}" title="Couleur intérieure" onchange="setStateColorByIndex(${i}, this.value, 'fill')">
+        <input type="color" class="set-color" value="${c.border}" title="Couleur du contour" onchange="setStateColorByIndex(${i}, this.value, 'border')">
+      </span>
+    </div>`;
   });
-  const cdef = (CONFIG.colors && CONFIG.colors._default) || '#38bdf8';
-  html += `<div class="set-color-row"><span class="set-color-label">Autre / non renseigné</span><input type="color" class="set-color" value="${cdef}" onchange="setStateColor('_default', this.value)"></div>`;
+  const cdef = (CONFIG.colors && CONFIG.colors._default) || { fill: '#38bdf8', border: '#ffffff' };
+  html += `<div class="set-color-row">
+    <span class="set-color-label">Autre / non renseigné</span>
+    <span class="set-color-pair">
+      <input type="color" class="set-color" value="${cdef.fill}" title="Couleur intérieure" onchange="setStateColor('_default', this.value, 'fill')">
+      <input type="color" class="set-color" value="${cdef.border}" title="Couleur du contour" onchange="setStateColor('_default', this.value, 'border')">
+    </span>
+  </div>`;
+  html += '<div class="set-empty" style="margin-top:8px">🎨 gauche = intérieur du point · droite = contour</div>';
   html += '</div>';
 
   html += '<div class="set-section-title">Armoires — listes de choix</div>';
@@ -3296,15 +3487,27 @@ function removeArmCustomField(idx) {
   CONFIG.armCustomFields.splice(idx, 1);
   saveConfig(); renderSettings();
 }
-function setStateColor(etat, color) {
+function setStateColor(etat, color, channel) {
   if (!CONFIG.colors) CONFIG.colors = {};
-  CONFIG.colors[etat] = color;
+  const cur = (typeof CONFIG.colors[etat] === 'object' && CONFIG.colors[etat]) ? CONFIG.colors[etat] : { fill: '#38bdf8', border: '#ffffff' };
+  cur[channel === 'border' ? 'border' : 'fill'] = color;
+  CONFIG.colors[etat] = cur;
   saveConfig();
   refreshMapMarkers();
+  renderList();
+  renderPanier();
 }
-function setStateColorByIndex(i, color) {
-  const et = (CONFIG.lists.etatSupport || [])[i];
-  if (et) setStateColor(et, color);
+function setStateColorByIndex(i, color, channel) {
+  const val = (CONFIG.lists[CONFIG.colorField] || [])[i];
+  if (val) setStateColor(val, color, channel);
+}
+function setColorField(field) {
+  CONFIG.colorField = field;
+  saveConfig();
+  refreshMapMarkers();
+  renderList();
+  renderPanier();
+  renderSettings();
 }
 
 let masseOptions = {
@@ -3434,7 +3637,9 @@ async function applyMasse() {
     : document.getElementById('masse-value').value;
   const targets = state.points.filter(p => p.dansPanier);
   if (!targets.length) { showToast('Aucun point sélectionné', 'error'); return; }
+  const entries = targets.map(p => ({ id: p.id, before: cloneEntry(p) }));
   targets.forEach(p => { p[key] = value; });
+  pushUndo('Modif. masse (' + targets.length + ' pts)', entries);
   saveLocal(); closeModalMasse(); renderPanier(); refreshMapMarkers();
   showToast(targets.length + ' point' + (targets.length > 1 ? 's' : '') + ' modifié' + (targets.length > 1 ? 's' : '') + ' — sync…', 'success');
   for (const p of targets) { await syncPointToSheets(p); }
@@ -3480,7 +3685,9 @@ async function applyMasseAll() {
     if (v !== '') patch[key] = v;
   });
   if (!Object.keys(patch).length) { showToast('Aucun champ rempli', 'error'); return; }
+  const entries = targets.map(p => ({ id: p.id, before: cloneEntry(p) }));
   targets.forEach(p => { Object.assign(p, patch); });
+  pushUndo('Modif. masse (' + targets.length + ' pts)', entries);
   saveLocal(); closeModalMasseAll(); renderPanier(); refreshMapMarkers();
   showToast(targets.length + ' point' + (targets.length > 1 ? 's' : '') + ' modifié' + (targets.length > 1 ? 's' : '') + ' — sync…', 'success');
   for (const p of targets) { await syncPointToSheets(p); }
