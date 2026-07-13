@@ -1050,7 +1050,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v37</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v38</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -4115,6 +4115,7 @@ async function uploadPendingPhotos() {
   try {
     let items = [];
     try { items = await DB.all('photoQueue'); } catch (e) {}
+    let firstErr = null;
     for (const it of items) {
       if (!navigator.onLine) break;
       let rec = null;
@@ -4141,8 +4142,13 @@ async function uploadPendingPhotos() {
         await DB.del('photoQueue', it.key);
       } catch (e) {
         console.warn('upload photo différé:', e);
+        if (!firstErr) firstErr = e;
         continue; // on passe à la suivante ; celle-ci sera retentée au prochain passage
       }
+    }
+    if (firstErr) {
+      // Fait remonter la raison exacte du blocage à l'écran (diagnostic terrain)
+      showToast('Photo refusée : ' + String(firstErr.message || firstErr).slice(0, 90), 'error');
     }
   } finally { isUploadingPhotos = false; }
 }
