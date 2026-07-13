@@ -1050,7 +1050,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v36</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v37</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2373,17 +2373,24 @@ function togglePanier() {
 function takePhoto(type) {
   const input = document.createElement('input');
   input.type = 'file'; input.accept = 'image/*'; input.capture = 'environment';
+  input.style.display = 'none';
+  // OBLIGATOIRE en PWA iOS installée : sans rattachement au DOM, l'événement
+  // de retour de l'appareil photo ne se déclenche jamais (photo perdue en silence).
+  document.body.appendChild(input);
+  const cleanup = () => { try { document.body.removeChild(input); } catch (e) {} };
   input.onchange = async (e) => {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file) { cleanup(); return; }
     try {
       const blob = await downscaleToBlob(file);   // compression → fini le quota
       state.photoBlobs[type] = blob;               // persistée à l'enregistrement
       renderPhotoThumb(type, URL.createObjectURL(blob));
+      showToast('Photo ajoutée — pensez à Enregistrer', 'success');
     } catch (err) {
       console.error('photo', err);
       showToast('Photo illisible, réessayez', 'error');
     }
+    cleanup();
   };
   input.click();
 }
@@ -2680,15 +2687,20 @@ function captureGPSArmoire() {
 function takeArmoirePhoto(type) {
   const input = document.createElement('input');
   input.type = 'file'; input.accept = 'image/*'; input.capture = 'environment';
+  input.style.display = 'none';
+  document.body.appendChild(input);   // idem : indispensable en PWA iOS installée
+  const cleanup = () => { try { document.body.removeChild(input); } catch (e) {} };
   input.onchange = async (e) => {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file) { cleanup(); return; }
     try {
       const blob = await downscaleToBlob(file);
       state.armoirePhotoBlobs[type] = blob;
       const slot = document.getElementById('photo-' + type);
       if (slot) slot.innerHTML = '<img src="' + URL.createObjectURL(blob) + '" alt=""><span class="pbadge">✓</span>';
+      showToast('Photo ajoutée — pensez à Enregistrer', 'success');
     } catch { showToast('Photo illisible, réessayez', 'error'); }
+    cleanup();
   };
   input.click();
 }
@@ -4129,7 +4141,7 @@ async function uploadPendingPhotos() {
         await DB.del('photoQueue', it.key);
       } catch (e) {
         console.warn('upload photo différé:', e);
-        break; // on retentera au prochain passage
+        continue; // on passe à la suivante ; celle-ci sera retentée au prochain passage
       }
     }
   } finally { isUploadingPhotos = false; }
