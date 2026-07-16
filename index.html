@@ -728,6 +728,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="diag-line"><span class="k">Points enregistrés (local)</span><span class="v" id="d-points">—</span></div>
     <div class="diag-line"><span class="k">Photos enregistrées (local)</span><span class="v" id="d-photos">—</span></div>
     <div class="diag-line"><span class="k">En attente de sync</span><span class="v" id="d-queue">—</span></div>
+    <div class="diag-line"><span class="k">Dernière erreur photo</span><span class="v" id="d-photoerr" style="max-width:62%;text-align:right;word-break:break-word;white-space:normal">—</span></div>
     <div class="diag-line"><span class="k">Tuiles carte en cache</span><span class="v" id="d-tiles">—</span></div>
     <div class="diag-line"><span class="k">Stockage utilisé</span><span class="v" id="d-storage">—</span></div>
     <div class="diag-line"><span class="k">Stockage persistant</span><span class="v" id="d-persist">—</span></div>
@@ -1050,7 +1051,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v39</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v40</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -1490,6 +1491,7 @@ async function refreshDiag() {
     const tot = q + pq;
     set('d-queue', tot === 0 ? '0 ✓' : (String(tot) + (pq ? ' (dont ' + pq + ' photos)' : '')), tot === 0 ? 'ok' : 'warn');
   } catch (e) {}
+  set('d-photoerr', lastPhotoError || '—', lastPhotoError ? 'warn' : 'ok');
   try { const c = await caches.open('audit-ep-tiles-v1'); const k = await c.keys(); set('d-tiles', String(k.length)); } catch (e) { set('d-tiles', '—'); }
   try {
     if (navigator.storage && navigator.storage.estimate) {
@@ -4114,6 +4116,7 @@ function blobToBase64(blob) {
   });
 }
 let isUploadingPhotos = false;
+let lastPhotoError = '';   // dernier refus serveur, lisible dans le diagnostic
 async function uploadPendingPhotos() {
   if (isUploadingPhotos || !navigator.onLine) return;
   isUploadingPhotos = true;
@@ -4156,6 +4159,7 @@ async function uploadPendingPhotos() {
       }
     }
     if (firstErr) {
+      lastPhotoError = new Date().toLocaleTimeString() + ' — ' + String(firstErr.message || firstErr);
       // Fait remonter la raison exacte du blocage à l'écran (diagnostic terrain)
       showToast('Photo refusée : ' + String(firstErr.message || firstErr).slice(0, 90), 'error');
     }
