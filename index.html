@@ -642,6 +642,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .lasso-hint{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:750;background:rgba(56,189,248,.16);border:1px solid var(--accent);color:var(--accent);font-size:12px;padding:6px 14px;border-radius:999px;display:none;white-space:nowrap}
 .lasso-hint.show{display:block}
 .leaflet-container.lasso-on{cursor:crosshair}
+.movegroup-hint{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:750;background:rgba(167,139,250,.16);border:1px solid #a78bfa;color:#a78bfa;font-size:12px;padding:6px 14px;border-radius:999px;display:none;white-space:nowrap;text-align:center}
+.movegroup-hint.show{display:block}
+.movegroup-hint .movegroup-cancel{text-decoration:underline;font-weight:600;margin-left:6px;cursor:pointer}
+.leaflet-container.movegroup-on{cursor:move}
 .settings-head{padding:calc(env(safe-area-inset-top) + 16px) 18px 12px}
 .settings-title{font-size:22px;font-weight:700;color:var(--text)}
 .settings-sub{font-size:13px;color:#94a3b8;margin-top:4px}
@@ -839,6 +843,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12V2M5 8l4 4 4-4M2 12v3a1 1 0 001 1h12a1 1 0 001-1v-3"/></svg>
   </div>
   <div class="lasso-hint" id="lasso-hint">Lasso actif — entourez les points au doigt</div>
+  <div class="movegroup-hint" id="movegroup-hint">Glissez sur la carte pour déplacer <span id="movegroup-hint-count">0</span> point(s)<span class="movegroup-cancel" onclick="cancelMoveGroup()">Annuler</span></div>
 </div>
 
 <!-- ══════════════════════════════════════════
@@ -1242,6 +1247,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <button class="btn-modal-action" onclick="closeModalMasseChoice();openModalMasseAll()" style="background:var(--orange-dim);color:var(--orange);border-color:var(--orange)">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
         Plusieurs caractéristiques (formulaire complet)
+      </button>
+      <button class="btn-modal-action" onclick="closeModalMasseChoice();startMoveGroup()" style="background:rgba(167,139,250,0.15);color:#a78bfa;border-color:#a78bfa">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1v14M1 8h14M8 1l-2.5 2.5M8 1l2.5 2.5M8 15l-2.5-2.5M8 15l2.5-2.5M1 8l2.5-2.5M1 8l2.5 2.5M15 8l-2.5-2.5M15 8l-2.5 2.5"/></svg>
+        Déplacer le groupe
       </button>
       <button class="btn-modal-action" onclick="closeModalMasseChoice();deselectLasso()" style="background:rgba(148,163,184,0.15);color:#94a3b8;border-color:#94a3b8">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M5 8h6"/></svg>
@@ -1890,6 +1899,10 @@ function initMap() {
   cont.addEventListener('pointermove', lassoMoveHandler, { passive: false });
   cont.addEventListener('pointerup', lassoUp);
   cont.addEventListener('pointercancel', lassoUp);
+  cont.addEventListener('pointerdown', moveGroupDown);
+  cont.addEventListener('pointermove', moveGroupMoveHandler, { passive: false });
+  cont.addEventListener('pointerup', moveGroupUp);
+  cont.addEventListener('pointercancel', moveGroupCancelDrag);
   loadFromSheets();
   centerOnMe();
   startPolling();   // rafraîchit depuis le Sheet toutes les 30 s (si en ligne + app au premier plan)
@@ -2030,6 +2043,111 @@ function finishLasso() {
   refreshMapMarkers();
   if (count) { showToast(count + ' point' + (count > 1 ? 's' : '') + ' sélectionné' + (count > 1 ? 's' : ''), 'success'); openModalMasseChoice(); }
   else showToast('Aucun point dans la zone', '');
+}
+
+/* ════════ Déplacement groupé (glisser tous les points du panier d'un même vecteur) ════════
+   Principe : on ne bouge pas les vrais marqueurs pendant le glisser (ils sont dans un
+   cluster, les redessiner en continu serait coûteux et saccadé). On affiche à la place
+   des « fantômes » violets qui suivent le doigt, et on n'applique le déplacement réel
+   aux points qu'au relâchement — avec undo, comme pour un déplacement individuel. */
+let moveGroupMode = false, moveGroupActive = false, moveGroupStart = null;
+let moveGroupOriginal = [];     // [{ id, lat, lng }] snapshot des points sélectionnés au départ du geste
+let moveGroupGhostLayer = null; // calque des marqueurs fantômes affichés pendant le glisser
+
+function startMoveGroup() {
+  const pts = state.points.filter(p => p.dansPanier && p.lat != null && p.lng != null);
+  if (!pts.length) { showToast('Aucun point sélectionné', 'error'); return; }
+  if (poseMode) togglePose();
+  if (lassoMode) toggleLasso();
+  if (armoirePoseMode) toggleArmoirePose();
+  moveGroupMode = true;
+  moveGroupOriginal = pts.map(p => ({ id: p.id, lat: p.lat, lng: p.lng }));
+  document.getElementById('movegroup-hint-count').textContent = pts.length;
+  document.getElementById('movegroup-hint').classList.add('show');
+  map.getContainer().classList.add('movegroup-on');
+  map.dragging.disable(); map.doubleClickZoom.disable(); if (map.touchZoom) map.touchZoom.disable();
+  showToast('Glissez sur la carte pour déplacer les ' + pts.length + ' points sélectionnés', '');
+}
+
+function endMoveGroupMode() {
+  moveGroupMode = false;
+  moveGroupActive = false;
+  moveGroupStart = null;
+  moveGroupOriginal = [];
+  if (moveGroupGhostLayer) { map.removeLayer(moveGroupGhostLayer); moveGroupGhostLayer = null; }
+  document.getElementById('movegroup-hint').classList.remove('show');
+  map.getContainer().classList.remove('movegroup-on');
+  map.dragging.enable(); map.doubleClickZoom.enable(); if (map.touchZoom) map.touchZoom.enable();
+}
+
+function cancelMoveGroup() {
+  if (!moveGroupMode) return;
+  endMoveGroupMode();
+  showToast('Déplacement groupé annulé', '');
+}
+
+function buildMoveGroupGhosts() {
+  moveGroupGhostLayer = L.layerGroup().addTo(map);
+  moveGroupOriginal.forEach(o => {
+    const m = L.circleMarker([o.lat, o.lng], {
+      radius: 8, color: '#a78bfa', weight: 2, fillColor: '#a78bfa', fillOpacity: 0.55
+    });
+    m._origLat = o.lat; m._origLng = o.lng; m._ptId = o.id;
+    m.addTo(moveGroupGhostLayer);
+  });
+}
+
+function moveGroupDown(ev) {
+  if (!moveGroupMode) return;
+  ev.preventDefault();
+  moveGroupActive = true;
+  moveGroupStart = _evLatLng(ev);
+  buildMoveGroupGhosts();
+}
+
+function moveGroupMoveHandler(ev) {
+  if (!moveGroupMode || !moveGroupActive) return;
+  ev.preventDefault();
+  const cur = _evLatLng(ev);
+  const dLat = cur.lat - moveGroupStart.lat, dLng = cur.lng - moveGroupStart.lng;
+  if (moveGroupGhostLayer) {
+    moveGroupGhostLayer.eachLayer(m => m.setLatLng([m._origLat + dLat, m._origLng + dLng]));
+  }
+}
+
+function moveGroupCancelDrag() {
+  if (!moveGroupMode || !moveGroupActive) return;
+  moveGroupActive = false;
+  if (moveGroupGhostLayer) { map.removeLayer(moveGroupGhostLayer); moveGroupGhostLayer = null; }
+}
+
+async function moveGroupUp(ev) {
+  if (!moveGroupMode || !moveGroupActive) return;
+  moveGroupActive = false;
+  const cur = _evLatLng(ev);
+  const dLat = cur.lat - moveGroupStart.lat, dLng = cur.lng - moveGroupStart.lng;
+  const snapshot = moveGroupOriginal.slice();
+  endMoveGroupMode();
+  if (Math.abs(dLat) < 1e-7 && Math.abs(dLng) < 1e-7) { showToast('Aucun déplacement — geste trop court', ''); return; }
+  const entries = [];
+  const moved = [];
+  snapshot.forEach(o => {
+    const pt = state.points.find(p => p.id === o.id);
+    if (!pt) return;
+    entries.push({ id: pt.id, before: cloneEntry(pt) });
+    pt.lat = o.lat + dLat;
+    pt.lng = o.lng + dLng;
+    pt.sourcePosition = 'Déplacement groupé (carte)';
+    moved.push(pt);
+  });
+  if (!moved.length) return;
+  pushUndo('Déplacement groupé de ' + moved.length + ' point' + (moved.length > 1 ? 's' : ''), entries);
+  saveLocal();
+  refreshMapMarkers();
+  updateStatus();
+  showToast(moved.length + ' point' + (moved.length > 1 ? 's' : '') + ' déplacé' + (moved.length > 1 ? 's' : '') + ' — sync…', 'success');
+  for (const p of moved) { await syncPointToSheets(p); }
+  updateStatus();
 }
 
 function getMarkerColor(pt) {
