@@ -1051,7 +1051,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v40</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v41</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2445,7 +2445,7 @@ async function savePoint() {
     for (const k of PHOTO_TYPES) {
       if (state.photoBlobs[k]) {
         await savePhotoBlob(data.id, k, state.photoBlobs[k]);
-        await enqueuePhoto(data.id, k, 'Points Lumineux', PHOTO_COLS[k]);
+        await enqueuePhoto(data.id, k, 'Points Lumineux', PHOTO_COLS[k], data.idArmoire || '');
       }
     }
   } catch (e) { console.error('photo save', e); showToast('⚠ Échec sauvegarde photo', 'error'); }
@@ -2652,7 +2652,7 @@ async function saveArmoire() {
   for (const k of ARM_PHOTO_TYPES) {
     if (state.armoirePhotoBlobs[k]) {
       await savePhotoBlob(arm.id, k, state.armoirePhotoBlobs[k]).catch(e => console.error('photo armoire', e));
-      await enqueuePhoto(arm.id, k, 'Armoires', ARM_PHOTO_COLS[k]);
+      await enqueuePhoto(arm.id, k, 'Armoires', ARM_PHOTO_COLS[k], arm.id);
     }
   }
 
@@ -4102,9 +4102,9 @@ async function syncPointToSheets(pt) {
 const PHOTO_COLS = { luminaire: 'Photo du Luminaire', mat: 'Photo du mât', classe2: 'Photo du classe 2' };
 const ARM_PHOTO_COLS = { arm_ext: 'Photos Extérieur', arm_int: 'Photos Intérieur', arm_compteur: 'Photo Compteur' };
 
-async function enqueuePhoto(ownerId, type, sheet, column) {
+async function enqueuePhoto(ownerId, type, sheet, column, armoire) {
   try {
-    await DB.put('photoQueue', { key: ownerId + '__' + type, ownerId, type, sheet, column, ts: Date.now() });
+    await DB.put('photoQueue', { key: ownerId + '__' + type, ownerId, type, sheet, column, armoire: armoire || '', ts: Date.now() });
   } catch (e) { console.error('enqueuePhoto', e); }
 }
 function blobToBase64(blob) {
@@ -4142,6 +4142,7 @@ async function uploadPendingPhotos() {
             sheet: it.sheet,
             id: it.ownerId,
             column: it.column,
+            armoire: it.armoire || '',
             filename: it.ownerId + '__' + it.type + '.jpg',
             mime: 'image/jpeg',
             chantier: state.chantier || '',
