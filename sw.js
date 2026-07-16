@@ -3,7 +3,7 @@
    - Cache les tuiles de carte (cache séparé, persistant) → carte visible hors réseau.
 */
 
-const SHELL_CACHE = 'audit-ep-shell-v38';
+const SHELL_CACHE = 'audit-ep-shell-v39';
 const TILE_CACHE  = 'audit-ep-tiles-v1';
 
 const SHELL = [

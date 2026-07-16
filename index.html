@@ -1050,7 +1050,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v38</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v39</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -1484,7 +1484,12 @@ async function refreshDiag() {
   set('d-net', navigator.onLine ? 'En ligne' : 'Hors ligne', navigator.onLine ? 'ok' : 'warn');
   try { set('d-points', String(await DB.count('points'))); } catch (e) { set('d-points', '—'); }
   try { set('d-photos', String(await DB.count('photos'))); } catch (e) { set('d-photos', '—'); }
-  try { const q = await DB.count('queue'); set('d-queue', q === 0 ? '0 ✓' : String(q), q === 0 ? 'ok' : 'warn'); } catch (e) {}
+  try {
+    const q = await DB.count('queue');
+    let pq = 0; try { pq = await DB.count('photoQueue'); } catch (e2) {}
+    const tot = q + pq;
+    set('d-queue', tot === 0 ? '0 ✓' : (String(tot) + (pq ? ' (dont ' + pq + ' photos)' : '')), tot === 0 ? 'ok' : 'warn');
+  } catch (e) {}
   try { const c = await caches.open('audit-ep-tiles-v1'); const k = await c.keys(); set('d-tiles', String(k.length)); } catch (e) { set('d-tiles', '—'); }
   try {
     if (navigator.storage && navigator.storage.estimate) {
@@ -4123,8 +4128,11 @@ async function uploadPendingPhotos() {
       if (!rec || !rec.blob) { try { await DB.del('photoQueue', it.key); } catch (e) {} continue; }
       try {
         const b64 = await blobToBase64(rec.blob);
+        const ctl = new AbortController();
+        const tmo = setTimeout(() => ctl.abort(), 45000);   // 45 s max par photo : un envoi suspendu ne bloque plus tout
         const res = await fetch(SCRIPT_URL, {
           method: 'POST',
+          signal: ctl.signal,
           headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify({
             action: 'photo',
@@ -4137,6 +4145,7 @@ async function uploadPendingPhotos() {
             data: b64
           })
         });
+        clearTimeout(tmo);
         const result = await res.json();
         if (result.error) throw new Error(result.error);
         await DB.del('photoQueue', it.key);
