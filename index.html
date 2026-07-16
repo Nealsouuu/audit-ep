@@ -669,10 +669,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .set-mini:disabled{opacity:.3}
 .tpl-bar{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 10px;-webkit-overflow-scrolling:touch}
 .tpl-bar:empty{display:none}
-.tpl-card{flex:0 0 auto;width:78px;background:var(--bg2,#1e293b);border:1px solid var(--border2,#334155);border-radius:10px;padding:6px;text-align:center;cursor:pointer}
+.tpl-card{flex:0 0 auto;width:210px;background:var(--bg2,#1e293b);border:1px solid var(--border2,#334155);border-radius:14px;padding:10px;text-align:center;cursor:pointer}
 .tpl-card:active{border-color:var(--accent)}
-.tpl-thumb{width:64px;height:48px;border-radius:6px;object-fit:cover;background:var(--bg1,#0f172a);display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto}
-.tpl-name{font-size:10px;color:var(--text);margin-top:5px;line-height:1.2;max-height:24px;overflow:hidden}
+.tpl-thumb{width:190px;height:130px;border-radius:10px;object-fit:cover;background:var(--bg1,#0f172a);display:flex;align-items:center;justify-content:center;font-size:52px;margin:0 auto}
+.tpl-name{font-size:14px;font-weight:600;color:var(--text);margin-top:8px;line-height:1.25;max-height:36px;overflow:hidden}
 .tpl-add{border-style:dashed;color:var(--accent)}
 .tpl-add .tpl-thumb{font-size:26px;color:var(--accent)}
 .set-tpl-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border2,#334155)}
@@ -1051,7 +1051,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v41</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v42</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -1255,12 +1255,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="modal-overlay" id="modal-masse" onclick="closeModalMasse(event)">
   <div class="modal">
     <div class="modal-title">Modifier en masse</div>
-    <div class="form-label" id="masse-tpl-label" style="margin-bottom:6px">Appliquer une trame à la sélection</div>
-    <div class="tpl-bar" id="masse-tpl-bar"></div>
     <div class="form-row">
       <div class="form-label">Champ à modifier</div>
       <select class="form-select" id="masse-field">
         <option value="">-- Sélectionner --</option>
+        <option value="__trame">🗂 Trame prédéfinie (toutes les caractéristiques)</option>
         <option value="f-type-support">Type de support</option>
         <option value="f-type-attache">Type d'attache</option>
         <option value="f-etat-support">État du support</option>
@@ -1271,6 +1270,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
         <option value="f-id-armoire">ID Armoire</option>
       </select>
     </div>
+    <div class="tpl-bar" id="masse-tpl-bar" style="display:none"></div>
     <div class="form-row" id="masse-value-row" style="display:none">
       <div class="form-label">Nouvelle valeur</div>
       <select class="form-select" id="masse-value"></select>
@@ -3555,6 +3555,13 @@ document.getElementById('masse-field').addEventListener('change', function() {
   const selRow = document.getElementById('masse-value-row');
   const txtRow = document.getElementById('masse-text-row');
   const sel = document.getElementById('masse-value');
+  const tplBar = document.getElementById('masse-tpl-bar');
+  if (tplBar) tplBar.style.display = 'none';
+  if (f === '__trame') {
+    selRow.style.display = 'none'; txtRow.style.display = 'none';
+    if (tplBar) { renderMasseTplBar(); tplBar.style.display = 'flex'; }
+    return;
+  }
   if (masseOptions[f]) {
     sel.innerHTML = masseOptions[f].map(o => `<option>${o}</option>`).join('');
     selRow.style.display = 'block'; txtRow.style.display = 'none';
@@ -3604,10 +3611,9 @@ const FIELD_TO_KEY = {
 };
 function renderMasseTplBar() {
   const bar = document.getElementById('masse-tpl-bar');
-  const label = document.getElementById('masse-tpl-label');
   if (!bar) return;
   const tpls = CONFIG.templates || [];
-  if (label) label.style.display = tpls.length ? 'block' : 'none';
+  if (!tpls.length) { bar.innerHTML = '<div class="set-empty" style="padding:8px">Aucune trame — créez-en dans Réglages.</div>'; return; }
   bar.innerHTML = tpls.map((t, i) => `
     <div class="tpl-card" style="${t.color ? 'border:2px solid ' + t.color : ''}" onclick="applyTemplateToSelection(${i})">
       ${t.thumb ? `<img class="tpl-thumb" src="${t.thumb}" alt="">` : `<div class="tpl-thumb">💡</div>`}
@@ -3640,7 +3646,8 @@ function openModalMasse() {
   document.getElementById('masse-field').value = '';
   document.getElementById('masse-value-row').style.display = 'none';
   document.getElementById('masse-text-row').style.display = 'none';
-  renderMasseTplBar();
+  const _mtb = document.getElementById('masse-tpl-bar');
+  if (_mtb) _mtb.style.display = 'none';
   document.getElementById('modal-masse').classList.add('open');
 }
 function closeModalMasse(e) {
@@ -3649,6 +3656,7 @@ function closeModalMasse(e) {
 }
 async function applyMasse() {
   const field = document.getElementById('masse-field').value;
+  if (field === '__trame') { showToast('Touchez une trame dans le bandeau pour l\u2019appliquer', 'error'); return; }
   const key = masseKeys[field];
   if (!field || !key) { showToast('Sélectionnez un champ', 'error'); return; }
   const value = masseTextFields.includes(field)
