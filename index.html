@@ -2362,7 +2362,92 @@ async function confirmMarkerMove(marker, id) {
   await syncPointToSheets(pt);
 }
 
-// ── Déplacement d'une armoire directement sur la carte ──
+// ── Déplacement GROUPÉ des points sélectionnés (lasso / panier) ──
+// Glisser n'importe quel point du groupe déplace tous les autres du même décalage.
+let groupMoveMode = false;
+let groupMoveOrigins = null;      // Map id → {lat,lng} au moment du dragstart
+let groupMoveStartLatLng = null;  // position de départ du marqueur qu'on tient au doigt
+
+function startMoveGroup() {
+  const targets = state.points.filter(p => p.dansPanier && p.lat != null && p.lng != null);
+  if (!targets.length) { showToast('Aucun point positionné dans la sélection', 'error'); return; }
+  if (targets.length < 2) { showToast('Sélectionnez au moins 2 points pour un déplacement groupé', 'error'); return; }
+
+  // Cadre la carte sur le groupe et force un zoom suffisant pour sortir du mode cluster,
+  // sinon les points restent agrégés et impossibles à saisir individuellement au doigt.
+  const bounds = L.latLngBounds(targets.map(p => [p.lat, p.lng]));
+  map.fitBounds(bounds, { padding: [60, 60], maxZoom: 19 });
+
+  const attach = () => {
+    groupMoveMode = true;
+    let attached = 0;
+    targets.forEach(pt => {
+      const marker = markersById.get(pt.id);
+      if (!marker) return;
+      marker.dragging.enable();
+      marker.off('dragstart', onGroupDragStart);
+      marker.off('drag', onGroupDrag);
+      marker.off('dragend', onGroupDragEnd);
+      marker.on('dragstart', onGroupDragStart);
+      marker.on('drag', onGroupDrag);
+      marker.on('dragend', onGroupDragEnd);
+      attached++;
+    });
+    if (!attached) { groupMoveMode = false; showToast('Points hors de vue — réessayez', 'error'); return; }
+    showToast('Glissez n\u2019importe quel point pour déplacer les ' + targets.length + ' points ensemble', '');
+  };
+  // Laisse le temps au fitBounds/re-rendu des clusters de se stabiliser avant d'activer le drag
+  setTimeout(attach, 350);
+}
+
+function onGroupDragStart(ev) {
+  if (!groupMoveMode) return;
+  const targets = state.points.filter(p => p.dansPanier && p.lat != null && p.lng != null);
+  groupMoveOrigins = new Map(targets.map(p => [p.id, { lat: p.lat, lng: p.lng }]));
+  groupMoveStartLatLng = ev.target.getLatLng();
+}
+
+function onGroupDrag(ev) {
+  if (!groupMoveMode || !groupMoveOrigins || !groupMoveStartLatLng) return;
+  const lead = ev.target.getLatLng();
+  const dLat = lead.lat - groupMoveStartLatLng.lat;
+  const dLng = lead.lng - groupMoveStartLatLng.lng;
+  groupMoveOrigins.forEach((orig, id) => {
+    if (ev.target === markersById.get(id)) return; // déjà à la bonne position (celui qu'on tient)
+    const m = markersById.get(id);
+    if (m) m.setLatLng([orig.lat + dLat, orig.lng + dLng]);
+  });
+}
+
+async function onGroupDragEnd(ev) {
+  if (!groupMoveMode || !groupMoveOrigins || !groupMoveStartLatLng) { groupMoveMode = false; return; }
+  const lead = ev.target.getLatLng();
+  const dLat = lead.lat - groupMoveStartLatLng.lat;
+  const dLng = lead.lng - groupMoveStartLatLng.lng;
+  const entries = [];
+  const changedPts = [];
+  groupMoveOrigins.forEach((orig, id) => {
+    const pt = state.points.find(p => p.id === id);
+    if (!pt) return;
+    entries.push({ id, before: cloneEntry(pt) });
+    pt.lat = orig.lat + dLat;
+    pt.lng = orig.lng + dLng;
+    pt.sourcePosition = 'Déplacement groupé (carte)';
+    changedPts.push(pt);
+  });
+  groupMoveMode = false;
+  groupMoveOrigins = null;
+  groupMoveStartLatLng = null;
+  pushUndo('Déplacement groupé (' + changedPts.length + ' pts)', entries);
+  saveLocal();
+  refreshMapMarkers();
+  updateStatus();
+  showToast('Synchronisation du groupe…', '');
+  for (const pt of changedPts) { await syncPointToSheets(pt); }
+  showToast(changedPts.length + ' points déplacés ✓', 'success');
+}
+
+
 function moveArmoireFromMap(id) {
   map.closePopup();
   const marker = armoireMarkersById.get(id);
@@ -4153,7 +4238,10 @@ async function loadArmoiresFromSheets(silent) {
 
 /* ═══════════ RÉGLAGES PARTAGÉS ENTRE APPAREILS (onglet "Config" du Sheet) ═══════════
    La config complète (trames, listes, couleurs, ordre, champs perso) est stockée en JSON
-   découpé sur des colonnes JSON1..JSON10 d'une ligne unique. Dernier enregistrement gagne. */
+   découpé sur des colonnes JSON1..JSON10 d'une ligne unique. Les trames, options de liste et
+   champs personnalisés sont FUSIONNÉS par clé à chaque pull (jamais un simple remplacement) :
+   voir mergeConfig() plus bas. Seuls les réglages sans identité propre (couleurs, ordre
+   d'affichage) restent en "dernier enregistrement gagne", sans risque de perte de contenu. */
 let _cfgTabWarned = false;
 function _cfgTabMissing(e) {
   if (!_cfgTabWarned && String(e).indexOf('Sheet not found') >= 0) {
@@ -4178,6 +4266,42 @@ async function pushConfigToSheets() {
     if (r.error) throw new Error(r.error);
   } catch (e) { console.warn('push config:', e); _cfgTabMissing(e); }
 }
+// Fusionne la config distante avec la config locale SANS jamais supprimer silencieusement
+// une trame, une option de liste ou un champ personnalisé créé sur un autre appareil pendant
+// que celui-ci était hors ligne. Contrairement à un simple "dernier enregistrement gagne",
+// on fait l'union des éléments identifiables (par clé) plutôt qu'un remplacement intégral.
+function mergeConfig(local, remote) {
+  const merged = JSON.parse(JSON.stringify(remote || {}));
+  let changed = false;
+
+  // Trames de fiche (point lumineux) : union par clé
+  merged.templates = Array.isArray(merged.templates) ? merged.templates : [];
+  const tplKeys = new Set(merged.templates.map(t => t.key));
+  (local.templates || []).forEach(t => {
+    if (!tplKeys.has(t.key)) { merged.templates.push(t); tplKeys.add(t.key); changed = true; }
+  });
+
+  // Listes déroulantes (État, Technologie, etc.) : union des valeurs par champ
+  merged.lists = merged.lists || {};
+  Object.keys(local.lists || {}).forEach(k => {
+    merged.lists[k] = Array.isArray(merged.lists[k]) ? merged.lists[k].slice() : [];
+    const have = new Set(merged.lists[k]);
+    (local.lists[k] || []).forEach(v => {
+      if (!have.has(v)) { merged.lists[k].push(v); have.add(v); changed = true; }
+    });
+  });
+
+  // Champs personnalisés (points + armoires) : union par clé
+  ['customFields', 'armCustomFields'].forEach(f => {
+    merged[f] = Array.isArray(merged[f]) ? merged[f] : [];
+    const have = new Set(merged[f].map(c => c.key));
+    (local[f] || []).forEach(c => {
+      if (!have.has(c.key)) { merged[f].push(c); have.add(c.key); changed = true; }
+    });
+  });
+
+  return { merged, changed };
+}
 async function syncConfigWithSheets(silent) {
   if (!navigator.onLine) return;
   try {
@@ -4186,18 +4310,24 @@ async function syncConfigWithSheets(silent) {
     if (data.error) throw new Error(data.error);
     const row = (data.rows || []).find(r => String(r['ID']) === 'config');
     if (!row) { if ((CONFIG.updatedAt || 0) > 0) pushConfigToSheets(); return; }
-    const remoteTs = Number(row['Updated']) || 0;
+    let json = '';
+    for (let i = 1; i <= 20; i++) json += String(row['JSON' + i] || '');
+    let remote = null;
+    try { remote = JSON.parse(json); } catch (e) { console.warn('config JSON corrompu côté Sheet', e); }
+    if (!remote) { if ((CONFIG.updatedAt || 0) > 0) pushConfigToSheets(); return; }
+    const remoteTs = Number(row['Updated']) || Number(remote.updatedAt) || 0;
     const localTs = CONFIG.updatedAt || 0;
-    if (remoteTs > localTs) {
-      let json = '';
-      for (let i = 1; i <= 20; i++) json += String(row['JSON' + i] || '');
-      const parsed = JSON.parse(json);
-      await DB.put('meta', { k: 'config', v: parsed });
+    const { merged, changed } = mergeConfig(CONFIG, remote);
+    const localWasBehind = remoteTs > localTs;
+    if (changed || localWasBehind) {
+      merged.updatedAt = changed ? Date.now() : remoteTs;
+      await DB.put('meta', { k: 'config', v: merged });
       await loadConfig();                          // fusion + application immédiate
       if (currentScreen === 'settings') renderSettings();
-      if (!silent) showToast('Réglages synchronisés depuis le Sheet ✓', 'success');
+      if (localWasBehind && !silent) showToast('Réglages synchronisés depuis le Sheet ✓', 'success');
+      if (changed) await pushConfigToSheets();      // repartage l'union (trames/options créées ailleurs)
     } else if (localTs > remoteTs) {
-      pushConfigToSheets();                        // cet appareil est plus récent → il partage
+      pushConfigToSheets();                         // rien à fusionner, cet appareil est juste plus récent
     }
   } catch (e) { console.warn('sync config:', e); _cfgTabMissing(e); }
 }
