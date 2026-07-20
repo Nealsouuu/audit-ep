@@ -3,7 +3,7 @@
    - Cache les tuiles de carte (cache séparé, persistant) → carte visible hors réseau.
 */
 
-const SHELL_CACHE = 'audit-ep-shell-v47';
+const SHELL_CACHE = 'audit-ep-shell-v44';
 const TILE_CACHE  = 'audit-ep-tiles-v1';
 
 const SHELL = [
@@ -17,8 +17,7 @@ const SHELL = [
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
   'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css',
   'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css',
-  'https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js',
-  'https://unpkg.com/proj4@2.11.0/dist/proj4.js'
+  'https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js'
 ];
 
 self.addEventListener('install', (e) => {

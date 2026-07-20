@@ -780,8 +780,13 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
     <div class="field-group">
       <label class="field-label">Chantier</label>
-      <select class="field-select" id="login-chantier" onchange="if(this.value==='__new'){addChantierFromLogin(this)}">
+      <select class="field-select" id="login-chantier">
         <option value="">-- Sélectionner --</option>
+        <option>Guadeloupe</option>
+        <option>Ménilles</option>
+        <option>Béziers Sud</option>
+        <option>Montpellier Est</option>
+        <option>Nîmes Centre</option>
       </select>
     </div>
     <button class="btn-primary" onclick="doLogin()">Commencer l'audit</button>
@@ -1054,7 +1059,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v46</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v43</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -1406,7 +1411,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-<script src="https://unpkg.com/proj4@2.11.0/dist/proj4.js"></script>
 <script>
 /* ════════ SOCLE ROBUSTESSE v4 ════════ */
 const PHOTO_MAX_DIM = 1280;
@@ -1806,40 +1810,6 @@ async function loadLocalArmoires() {
 }
 
 // ── LOGIN ──
-// ── Chantiers dynamiques (liste partagée entre appareils via la Config) ──
-function populateChantierSelect(selected) {
-  const sel = document.getElementById('login-chantier');
-  if (!sel) return;
-  const list = (CONFIG && Array.isArray(CONFIG.chantiers) && CONFIG.chantiers.length)
-    ? CONFIG.chantiers : CONFIG_DEFAULT.chantiers;
-  sel.innerHTML = '<option value="">-- Sélectionner --</option>' +
-    list.map(c => `<option${c === selected ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('') +
-    '<option value="__new">＋ Nouveau chantier…</option>';
-  if (selected) sel.value = selected;
-}
-async function addChantierFromLogin(sel) {
-  const name = (prompt('Nom du nouveau chantier (commune) :') || '').trim();
-  if (!name) { sel.value = ''; return; }
-  if (!Array.isArray(CONFIG.chantiers)) CONFIG.chantiers = CONFIG_DEFAULT.chantiers.slice();
-  if (!CONFIG.chantiers.includes(name)) {
-    CONFIG.chantiers.push(name);
-    CONFIG.chantiers.sort((a, b) => a.localeCompare(b, 'fr'));
-    await saveConfig();          // partagé avec les autres appareils via l'onglet Config
-  }
-  populateChantierSelect(name);
-  showToast('Chantier « ' + name + ' » créé — vous pouvez vous connecter', 'success');
-}
-// Au démarrage : charge la config locale pour remplir la liste avant la connexion
-(async function preloadChantiers() {
-  try {
-    const rec = await DB.get('meta', 'config');
-    if (rec && rec.v && Array.isArray(rec.v.chantiers) && rec.v.chantiers.length) {
-      CONFIG.chantiers = rec.v.chantiers;
-    }
-  } catch (e) {}
-  populateChantierSelect('');
-})();
-
 async function doLogin() {
   const prenom = document.getElementById('login-prenom').value.trim();
   const nom = document.getElementById('login-nom').value.trim();
@@ -2362,92 +2332,7 @@ async function confirmMarkerMove(marker, id) {
   await syncPointToSheets(pt);
 }
 
-// ── Déplacement GROUPÉ des points sélectionnés (lasso / panier) ──
-// Glisser n'importe quel point du groupe déplace tous les autres du même décalage.
-let groupMoveMode = false;
-let groupMoveOrigins = null;      // Map id → {lat,lng} au moment du dragstart
-let groupMoveStartLatLng = null;  // position de départ du marqueur qu'on tient au doigt
-
-function startMoveGroup() {
-  const targets = state.points.filter(p => p.dansPanier && p.lat != null && p.lng != null);
-  if (!targets.length) { showToast('Aucun point positionné dans la sélection', 'error'); return; }
-  if (targets.length < 2) { showToast('Sélectionnez au moins 2 points pour un déplacement groupé', 'error'); return; }
-
-  // Cadre la carte sur le groupe et force un zoom suffisant pour sortir du mode cluster,
-  // sinon les points restent agrégés et impossibles à saisir individuellement au doigt.
-  const bounds = L.latLngBounds(targets.map(p => [p.lat, p.lng]));
-  map.fitBounds(bounds, { padding: [60, 60], maxZoom: 19 });
-
-  const attach = () => {
-    groupMoveMode = true;
-    let attached = 0;
-    targets.forEach(pt => {
-      const marker = markersById.get(pt.id);
-      if (!marker) return;
-      marker.dragging.enable();
-      marker.off('dragstart', onGroupDragStart);
-      marker.off('drag', onGroupDrag);
-      marker.off('dragend', onGroupDragEnd);
-      marker.on('dragstart', onGroupDragStart);
-      marker.on('drag', onGroupDrag);
-      marker.on('dragend', onGroupDragEnd);
-      attached++;
-    });
-    if (!attached) { groupMoveMode = false; showToast('Points hors de vue — réessayez', 'error'); return; }
-    showToast('Glissez n\u2019importe quel point pour déplacer les ' + targets.length + ' points ensemble', '');
-  };
-  // Laisse le temps au fitBounds/re-rendu des clusters de se stabiliser avant d'activer le drag
-  setTimeout(attach, 350);
-}
-
-function onGroupDragStart(ev) {
-  if (!groupMoveMode) return;
-  const targets = state.points.filter(p => p.dansPanier && p.lat != null && p.lng != null);
-  groupMoveOrigins = new Map(targets.map(p => [p.id, { lat: p.lat, lng: p.lng }]));
-  groupMoveStartLatLng = ev.target.getLatLng();
-}
-
-function onGroupDrag(ev) {
-  if (!groupMoveMode || !groupMoveOrigins || !groupMoveStartLatLng) return;
-  const lead = ev.target.getLatLng();
-  const dLat = lead.lat - groupMoveStartLatLng.lat;
-  const dLng = lead.lng - groupMoveStartLatLng.lng;
-  groupMoveOrigins.forEach((orig, id) => {
-    if (ev.target === markersById.get(id)) return; // déjà à la bonne position (celui qu'on tient)
-    const m = markersById.get(id);
-    if (m) m.setLatLng([orig.lat + dLat, orig.lng + dLng]);
-  });
-}
-
-async function onGroupDragEnd(ev) {
-  if (!groupMoveMode || !groupMoveOrigins || !groupMoveStartLatLng) { groupMoveMode = false; return; }
-  const lead = ev.target.getLatLng();
-  const dLat = lead.lat - groupMoveStartLatLng.lat;
-  const dLng = lead.lng - groupMoveStartLatLng.lng;
-  const entries = [];
-  const changedPts = [];
-  groupMoveOrigins.forEach((orig, id) => {
-    const pt = state.points.find(p => p.id === id);
-    if (!pt) return;
-    entries.push({ id, before: cloneEntry(pt) });
-    pt.lat = orig.lat + dLat;
-    pt.lng = orig.lng + dLng;
-    pt.sourcePosition = 'Déplacement groupé (carte)';
-    changedPts.push(pt);
-  });
-  groupMoveMode = false;
-  groupMoveOrigins = null;
-  groupMoveStartLatLng = null;
-  pushUndo('Déplacement groupé (' + changedPts.length + ' pts)', entries);
-  saveLocal();
-  refreshMapMarkers();
-  updateStatus();
-  showToast('Synchronisation du groupe…', '');
-  for (const pt of changedPts) { await syncPointToSheets(pt); }
-  showToast(changedPts.length + ' points déplacés ✓', 'success');
-}
-
-
+// ── Déplacement d'une armoire directement sur la carte ──
 function moveArmoireFromMap(id) {
   map.closePopup();
   const marker = armoireMarkersById.get(id);
@@ -3079,7 +2964,6 @@ const CONFIG_DEFAULT = {
   orderPL: [],    // ordre des champs de la fiche point (vide = ordre d'origine)
   orderARM: [],   // ordre des champs de la fiche armoire
   templates: [],  // trames de fiche : { key, name, thumb, values, custom }
-  chantiers: ['Guadeloupe', 'Ménilles', 'Béziers Sud', 'Montpellier Est', 'Nîmes Centre'],
   updatedAt: 0    // horodatage pour la synchro des réglages entre appareils
 };
 // Correspondance : clé config → <select> du formulaire → libellé lisible
@@ -3113,7 +2997,6 @@ async function loadConfig() {
         orderPL: Array.isArray(rec.v.orderPL) ? rec.v.orderPL : [],
         orderARM: Array.isArray(rec.v.orderARM) ? rec.v.orderARM : [],
         templates: Array.isArray(rec.v.templates) ? rec.v.templates : [],
-        chantiers: Array.isArray(rec.v.chantiers) && rec.v.chantiers.length ? rec.v.chantiers : CONFIG_DEFAULT.chantiers.slice(),
         updatedAt: Number(rec.v.updatedAt) || 0
       };
     }
@@ -3529,139 +3412,6 @@ function tplPhotoChanged(i, input) {
   img.src = URL.createObjectURL(file);
 }
 
-/* ═══════════ IMPORT DE POINTS (SIG → carte) ═══════════ */
-function _projDef(crs) {
-  if (crs === 'l93') return '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=49 +lat_2=44 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs';
-  const m = /^cc(4[2-9]|50)$/.exec(crs);
-  if (m) {
-    const z = parseInt(m[1], 10);
-    return '+proj=lcc +lat_0=' + z + ' +lon_0=3 +lat_1=' + (z - 0.75) + ' +lat_2=' + (z + 0.75) +
-      ' +x_0=1700000 +y_0=' + ((z - 42) * 1000000 + 1200000) + ' +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs';
-  }
-  return null;
-}
-function _detectCRS(x, y) {
-  if (Math.abs(x) <= 180 && Math.abs(y) <= 90) {
-    // GPS — reste à deviner l'ordre lon/lat
-    const isLat = v => (v >= 41 && v <= 51.5) || (v >= 13.5 && v <= 18.5);   // métropole / Antilles
-    const isLon = v => (v >= -6 && v <= 10) || (v >= -63 && v <= -60);
-    if (isLon(x) && isLat(y)) return 'wgs';
-    if (isLat(x) && isLon(y)) return 'wgs_latlon';
-    return 'wgs';
-  }
-  if (x >= 1300000 && y >= 1000000 && y <= 8400000) {
-    const z = 42 + Math.round((y - 1200000) / 1000000);
-    if (z >= 42 && z <= 50) return 'cc' + z;
-  }
-  if (y >= 6000000 && y <= 7300000) return 'l93';
-  return null;
-}
-function _parseImportText() {
-  const raw = (document.getElementById('imp-text').value || '').trim();
-  if (!raw) return { rows: [], errors: ['Aucune donnée collée'] };
-  const rows = [];
-  const errors = [];
-  raw.split(/\r?\n/).forEach((line, i) => {
-    const t = line.trim();
-    if (!t) return;
-    const parts = t.split(/[;,\t]+/).map(v => v.trim()).filter(v => v !== '');
-    if (parts.length < 3) { if (i > 0 || rows.length) errors.push('Ligne ' + (i + 1) + ' incomplète'); return; }
-    const x = parseFloat(String(parts[1]).replace(',', '.'));
-    const y = parseFloat(String(parts[2]).replace(',', '.'));
-    if (!isFinite(x) || !isFinite(y)) {
-      if (i === 0) return;                       // ligne d'en-tête probable → ignorée
-      errors.push('Ligne ' + (i + 1) + ' : coordonnées illisibles');
-      return;
-    }
-    rows.push({ id: String(parts[0]), x, y });
-  });
-  return { rows, errors };
-}
-let _impReady = null;
-function previewImport() {
-  const out = document.getElementById('imp-preview');
-  const go = document.getElementById('imp-go');
-  _impReady = null;
-  go.style.display = 'none';
-  const { rows, errors } = _parseImportText();
-  if (!rows.length) { out.textContent = errors[0] || 'Aucun point détecté'; return; }
-  let crs = document.getElementById('imp-crs').value;
-  if (crs === 'auto') {
-    crs = _detectCRS(rows[0].x, rows[0].y);
-    if (!crs) { out.textContent = 'Système de coordonnées non reconnu — choisissez-le manuellement dans la liste.'; return; }
-  }
-  const def = _projDef(crs);
-  if (def && typeof proj4 === 'undefined') {
-    out.textContent = 'Module de conversion non chargé — connectez-vous à internet, rechargez l\u2019app, puis réessayez.';
-    return;
-  }
-  const pts = [];
-  for (const r of rows) {
-    let lat, lng;
-    if (crs === 'wgs') { lng = r.x; lat = r.y; }
-    else if (crs === 'wgs_latlon') { lat = r.x; lng = r.y; }
-    else { const c = proj4(def, proj4.WGS84, [r.x, r.y]); lng = c[0]; lat = c[1]; }
-    if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
-    pts.push({ id: r.id, lat: +lat.toFixed(7), lng: +lng.toFixed(7) });
-  }
-  if (!pts.length) { out.textContent = 'Conversion impossible — vérifiez le système choisi.'; return; }
-  const existing = new Set(state.points.map(p => String(p.id)));
-  const news = pts.filter(p => !existing.has(String(p.id)));
-  const labels = { wgs: 'GPS (lon;lat)', wgs_latlon: 'GPS (lat;lon)', l93: 'Lambert-93' };
-  const crsLabel = labels[crs] || crs.toUpperCase();
-  out.innerHTML = '<b>' + pts.length + '</b> point(s) lus · système <b>' + crsLabel + '</b> · 1er point → ' +
-    pts[0].lat.toFixed(5) + ', ' + pts[0].lng.toFixed(5) +
-    (pts.length - news.length ? ' · <span style="color:#facc15">' + (pts.length - news.length) + ' déjà existants (ignorés)</span>' : '') +
-    (errors.length ? ' · <span style="color:#f87171">' + errors.length + ' ligne(s) ignorée(s)</span>' : '') +
-    (news.length > 800 ? '<br><span style="color:#facc15">Import volumineux : préférez le collage direct dans le Sheet (voir MODOP).</span>' : '');
-  if (news.length) {
-    _impReady = news;
-    go.style.display = '';
-    go.textContent = 'Importer ' + news.length + ' point(s)';
-  } else {
-    out.innerHTML += '<br>Rien de nouveau à importer.';
-  }
-}
-async function runImport() {
-  const news = _impReady;
-  if (!news || !news.length) { showToast('Faites d\u2019abord « Analyser »', 'error'); return; }
-  _impReady = null;
-  document.getElementById('imp-go').style.display = 'none';
-  const today = new Date().toISOString().split('T')[0];
-  const created = [];
-  for (const p of news) {
-    const pt = {
-      id: p.id,
-      idArmoire: p.id.indexOf('-') > 0 ? p.id.split('-')[0] : '',
-      lat: p.lat, lng: p.lng,
-      nbrSupports: '', typeSupport: '', etatSupport: '', hauteur: '', typeAttache: '',
-      nbrLuminaires: '', typeLuminaire: '', etatLuminaire: '', technologie: '', puissance: '',
-      observations: '', custom: {}, photos: {},
-      dansPanier: false,
-      chantier: state.chantier,
-      technicien: state.technicien,
-      date: today,
-      classePrecision: 'C',
-      sourcePosition: 'Import SIG (app)',
-      gpsAccuracy: null
-    };
-    state.points.push(pt);
-    created.push(pt);
-    try { await DB.put('queue', { id: pt.id, pt: pt, ts: Date.now() }); } catch (e) {}
-  }
-  saveLocal();
-  refreshMapMarkers();
-  updateStatus();
-  showToast(created.length + ' point(s) importé(s) — synchronisation en cours…', 'success');
-  document.getElementById('imp-text').value = '';
-  document.getElementById('imp-preview').textContent = '—';
-  // Zoom sur la zone importée
-  const latlngs = created.map(p => [p.lat, p.lng]);
-  if (latlngs.length === 1) { showScreen('map'); map.setView(latlngs[0], 18); }
-  else if (latlngs.length > 1) { showScreen('map'); map.fitBounds(latlngs, { padding: [40, 40], maxZoom: 18 }); }
-  flushSyncQueue();
-}
-
 /* ═══════════ PAGE RÉGLAGES : rendu + édition ═══════════ */
 let _openSections = new Set();
 function toggleSection(el) {
@@ -3736,28 +3486,6 @@ function renderSettings() {
   }
   html += '<div class="set-add" style="margin-top:10px"><button class="set-btn" onclick="newTemplateFromSettings()">＋ Nouvelle trame</button></div>';
   html += '</div>';
-
-  html += '<div class="set-section-title">Importer des points (chantier : ' + escapeHtml(state.chantier || '?') + ')</div>';
-  html += `<div class="set-card">
-    <div class="set-empty" style="margin-bottom:8px">Collez les points du SIG : une ligne par point, <b>ID ; X ; Y</b> (séparateur ; , ou tabulation). Les coordonnées Lambert-93 et Coniques Conformes (CC42-CC50) sont converties automatiquement en GPS.</div>
-    <textarea class="set-input" id="imp-text" rows="6" placeholder="0100-0115;1500893.9;3222888.3&#10;0100-0116;1500901.2;3222901.7&#10;…" style="font-family:monospace;font-size:12px;margin-bottom:8px"></textarea>
-    <div class="set-add" style="margin-bottom:8px">
-      <select class="set-input" id="imp-crs">
-        <option value="auto">Système : détection automatique</option>
-        <option value="wgs">GPS (longitude;latitude)</option>
-        <option value="wgs_latlon">GPS (latitude;longitude)</option>
-        <option value="l93">Lambert-93</option>
-        <option value="cc42">CC42</option><option value="cc43">CC43</option><option value="cc44">CC44</option>
-        <option value="cc45">CC45</option><option value="cc46">CC46</option><option value="cc47">CC47</option>
-        <option value="cc48">CC48</option><option value="cc49">CC49</option><option value="cc50">CC50</option>
-      </select>
-    </div>
-    <div class="set-empty" id="imp-preview" style="margin-bottom:8px">—</div>
-    <div class="set-add">
-      <button class="set-btn" onclick="previewImport()">Analyser</button>
-      <button class="set-btn" id="imp-go" onclick="runImport()" style="display:none;background:#4ade80;color:#04222e">Importer</button>
-    </div>
-  </div>`;
 
   html += '<div class="set-section-title">Ordre des champs dans les fiches</div>';
   [['PL', 'Fiche point lumineux', PL_ORDER_DEFS, CONFIG.orderPL], ['ARM', 'Fiche armoire', ARM_ORDER_DEFS, CONFIG.orderARM]].forEach(([which, title, defs, saved]) => {
@@ -4238,10 +3966,7 @@ async function loadArmoiresFromSheets(silent) {
 
 /* ═══════════ RÉGLAGES PARTAGÉS ENTRE APPAREILS (onglet "Config" du Sheet) ═══════════
    La config complète (trames, listes, couleurs, ordre, champs perso) est stockée en JSON
-   découpé sur des colonnes JSON1..JSON10 d'une ligne unique. Les trames, options de liste et
-   champs personnalisés sont FUSIONNÉS par clé à chaque pull (jamais un simple remplacement) :
-   voir mergeConfig() plus bas. Seuls les réglages sans identité propre (couleurs, ordre
-   d'affichage) restent en "dernier enregistrement gagne", sans risque de perte de contenu. */
+   découpé sur des colonnes JSON1..JSON10 d'une ligne unique. Dernier enregistrement gagne. */
 let _cfgTabWarned = false;
 function _cfgTabMissing(e) {
   if (!_cfgTabWarned && String(e).indexOf('Sheet not found') >= 0) {
@@ -4266,42 +3991,6 @@ async function pushConfigToSheets() {
     if (r.error) throw new Error(r.error);
   } catch (e) { console.warn('push config:', e); _cfgTabMissing(e); }
 }
-// Fusionne la config distante avec la config locale SANS jamais supprimer silencieusement
-// une trame, une option de liste ou un champ personnalisé créé sur un autre appareil pendant
-// que celui-ci était hors ligne. Contrairement à un simple "dernier enregistrement gagne",
-// on fait l'union des éléments identifiables (par clé) plutôt qu'un remplacement intégral.
-function mergeConfig(local, remote) {
-  const merged = JSON.parse(JSON.stringify(remote || {}));
-  let changed = false;
-
-  // Trames de fiche (point lumineux) : union par clé
-  merged.templates = Array.isArray(merged.templates) ? merged.templates : [];
-  const tplKeys = new Set(merged.templates.map(t => t.key));
-  (local.templates || []).forEach(t => {
-    if (!tplKeys.has(t.key)) { merged.templates.push(t); tplKeys.add(t.key); changed = true; }
-  });
-
-  // Listes déroulantes (État, Technologie, etc.) : union des valeurs par champ
-  merged.lists = merged.lists || {};
-  Object.keys(local.lists || {}).forEach(k => {
-    merged.lists[k] = Array.isArray(merged.lists[k]) ? merged.lists[k].slice() : [];
-    const have = new Set(merged.lists[k]);
-    (local.lists[k] || []).forEach(v => {
-      if (!have.has(v)) { merged.lists[k].push(v); have.add(v); changed = true; }
-    });
-  });
-
-  // Champs personnalisés (points + armoires) : union par clé
-  ['customFields', 'armCustomFields'].forEach(f => {
-    merged[f] = Array.isArray(merged[f]) ? merged[f] : [];
-    const have = new Set(merged[f].map(c => c.key));
-    (local[f] || []).forEach(c => {
-      if (!have.has(c.key)) { merged[f].push(c); have.add(c.key); changed = true; }
-    });
-  });
-
-  return { merged, changed };
-}
 async function syncConfigWithSheets(silent) {
   if (!navigator.onLine) return;
   try {
@@ -4310,24 +3999,18 @@ async function syncConfigWithSheets(silent) {
     if (data.error) throw new Error(data.error);
     const row = (data.rows || []).find(r => String(r['ID']) === 'config');
     if (!row) { if ((CONFIG.updatedAt || 0) > 0) pushConfigToSheets(); return; }
-    let json = '';
-    for (let i = 1; i <= 20; i++) json += String(row['JSON' + i] || '');
-    let remote = null;
-    try { remote = JSON.parse(json); } catch (e) { console.warn('config JSON corrompu côté Sheet', e); }
-    if (!remote) { if ((CONFIG.updatedAt || 0) > 0) pushConfigToSheets(); return; }
-    const remoteTs = Number(row['Updated']) || Number(remote.updatedAt) || 0;
+    const remoteTs = Number(row['Updated']) || 0;
     const localTs = CONFIG.updatedAt || 0;
-    const { merged, changed } = mergeConfig(CONFIG, remote);
-    const localWasBehind = remoteTs > localTs;
-    if (changed || localWasBehind) {
-      merged.updatedAt = changed ? Date.now() : remoteTs;
-      await DB.put('meta', { k: 'config', v: merged });
+    if (remoteTs > localTs) {
+      let json = '';
+      for (let i = 1; i <= 20; i++) json += String(row['JSON' + i] || '');
+      const parsed = JSON.parse(json);
+      await DB.put('meta', { k: 'config', v: parsed });
       await loadConfig();                          // fusion + application immédiate
       if (currentScreen === 'settings') renderSettings();
-      if (localWasBehind && !silent) showToast('Réglages synchronisés depuis le Sheet ✓', 'success');
-      if (changed) await pushConfigToSheets();      // repartage l'union (trames/options créées ailleurs)
+      if (!silent) showToast('Réglages synchronisés depuis le Sheet ✓', 'success');
     } else if (localTs > remoteTs) {
-      pushConfigToSheets();                         // rien à fusionner, cet appareil est juste plus récent
+      pushConfigToSheets();                        // cet appareil est plus récent → il partage
     }
   } catch (e) { console.warn('sync config:', e); _cfgTabMissing(e); }
 }
