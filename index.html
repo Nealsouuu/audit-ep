@@ -726,6 +726,12 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 #dl-banner{position:absolute;top:calc(env(safe-area-inset-top) + 66px);left:50%;transform:translateX(-50%);z-index:900;background:rgba(15,23,42,.95);border:1px solid var(--accent);color:var(--text);font-size:13px;padding:9px 14px;border-radius:999px;display:none;align-items:center;gap:10px;white-space:nowrap}
 #dl-banner.show{display:flex}
 #dl-banner b{color:var(--accent)}
+/* Position en direct */
+.me-dot{width:16px;height:16px;border-radius:50%;background:#2f7bff;border:3px solid #fff;box-shadow:0 0 0 2px rgba(47,123,255,.5),0 2px 6px rgba(0,0,0,.4)}
+.me-dot.stale{background:#94a3b8}
+.map-ctrl-btn.tracking{background:#2f7bff}
+.map-ctrl-btn.tracking svg{stroke:#fff}
+.map-ctrl-btn.tracking svg circle[fill]{fill:#fff}
 </style>
 </head>
 <body>
@@ -866,6 +872,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
     <div class="map-ctrl-btn" onclick="map.zoomOut()">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round"><path d="M4 9h10"/></svg>
+    </div>
+    <div class="map-ctrl-btn" id="track-btn" onclick="toggleLocationTracking()" title="Afficher / suivre ma position en direct">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.6"><circle cx="9" cy="9" r="3.2"/><circle cx="9" cy="9" r="7" stroke-dasharray="2 2"/><circle cx="9" cy="9" r="1" fill="#94a3b8" stroke="none"/></svg>
     </div>
     <div class="map-ctrl-btn" onclick="centerOnMe()" title="Me localiser">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.5"><circle cx="9" cy="9" r="3"/><path d="M9 1v2M9 15v2M1 9h2M15 9h2" stroke-linecap="round"/></svg>
@@ -1118,7 +1127,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v53</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v57</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2523,8 +2532,9 @@ let _armIdsSorted = [];
 function _filterSet() { return new Set((state.filterArmoire || []).map(String)); }
 function populateArmoireFilter() {
   const ids = new Set();
-  state.armoires.forEach(a => { if (a.id) ids.add(String(a.id)); });
-  state.points.forEach(p => { if (p.idArmoire) ids.add(String(p.idArmoire)); });
+  const okC = x => !x || !x.chantier || String(x.chantier) === String(state.chantier);
+  state.armoires.forEach(a => { if (a.id && okC(a)) ids.add(String(a.id)); });
+  state.points.forEach(p => { if (p.idArmoire && okC(p)) ids.add(String(p.idArmoire)); });
   const sorted = [...ids].sort();
   const sig = sorted.join('|') + '§' + (state.filterArmoire || []).slice().sort().join(',');
   if (sig === _filterSig) return;
@@ -2602,6 +2612,7 @@ function refreshMapMarkers() {
   const ptMarkers = [];
   state.points.forEach(pt => {
     if (!pt.lat || !pt.lng) return;
+    if (state.chantier && pt.chantier && String(pt.chantier) !== String(state.chantier)) return;
     if (state.filterArmoire.length && !state.filterArmoire.includes(String(pt.idArmoire))) return;
     const color = getMarkerColor(pt);
     const icon = L.divIcon({
@@ -2631,6 +2642,7 @@ function refreshMapMarkers() {
   // Marqueurs armoires (carré orange avec éclair)
   state.armoires.forEach(arm => {
     if (!arm.lat || !arm.lng) return;
+    if (state.chantier && arm.chantier && String(arm.chantier) !== String(state.chantier)) return;
     if (state.filterArmoire.length && !state.filterArmoire.includes(String(arm.id))) return;
     const nbPts = state.points.filter(p => String(p.idArmoire || '').trim() === String(arm.id).trim()).length;
     const icon = L.divIcon({
@@ -2662,11 +2674,65 @@ function refreshMapMarkers() {
   document.getElementById('map-count-badge').textContent = ptsLabel + ' · ' + armLabel;
 }
 
+let _watchId = null;
+let meMarker = null, meAccuracy = null, _meFirstFix = false, _meStaleTimer = null;
+
 function centerOnMe() {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(pos => {
-    if (map) map.setView([pos.coords.latitude, pos.coords.longitude], 16);
-  });
+  if (!navigator.geolocation) { showToast('Géolocalisation indisponible', 'error'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => { if (map) map.setView([pos.coords.latitude, pos.coords.longitude], 17); updateMePosition(pos); },
+    err => showToast('Position introuvable (' + err.code + ')', 'error'),
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+  );
+}
+
+function toggleLocationTracking() {
+  if (_watchId !== null) { stopLocationTracking(); return; }
+  if (!navigator.geolocation) { showToast('Géolocalisation indisponible sur cet appareil', 'error'); return; }
+  _meFirstFix = false;
+  _watchId = navigator.geolocation.watchPosition(
+    pos => updateMePosition(pos, true),
+    err => {
+      showToast(err.code === 1 ? 'Localisation refusée — autorisez-la dans les réglages'
+             : 'Signal GPS faible, on réessaie…', 'error');
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 }
+  );
+  const btn = document.getElementById('track-btn');
+  if (btn) btn.classList.add('tracking');
+  showToast('Suivi de position activé', 'success');
+}
+
+function stopLocationTracking() {
+  if (_watchId !== null) { navigator.geolocation.clearWatch(_watchId); _watchId = null; }
+  if (meMarker) { map.removeLayer(meMarker); meMarker = null; }
+  if (meAccuracy) { map.removeLayer(meAccuracy); meAccuracy = null; }
+  if (_meStaleTimer) { clearTimeout(_meStaleTimer); _meStaleTimer = null; }
+  const btn = document.getElementById('track-btn');
+  if (btn) btn.classList.remove('tracking');
+  showToast('Suivi de position désactivé', '');
+}
+
+function updateMePosition(pos, recenterFirst) {
+  if (!map) return;
+  const ll = [pos.coords.latitude, pos.coords.longitude];
+  const acc = pos.coords.accuracy || 0;
+  // halo de précision
+  if (!meAccuracy) {
+    meAccuracy = L.circle(ll, { radius: acc, color: '#2f7bff', weight: 1, fillColor: '#2f7bff', fillOpacity: 0.12, interactive: false }).addTo(map);
+  } else { meAccuracy.setLatLng(ll); meAccuracy.setRadius(acc); }
+  // point bleu
+  const icon = L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [16,16], iconAnchor: [8,8] });
+  if (!meMarker) {
+    meMarker = L.marker(ll, { icon, zIndexOffset: 2000, interactive: false }).addTo(map);
+  } else { meMarker.setLatLng(ll); }
+  // recentre uniquement au premier point (pour ne pas gêner pendant la saisie)
+  if (recenterFirst && !_meFirstFix) { map.setView(ll, Math.max(map.getZoom(), 17)); _meFirstFix = true; }
+  // marque la position "périmée" (grise) si plus aucune mise à jour pendant 15 s
+  if (_meStaleTimer) clearTimeout(_meStaleTimer);
+  const dot = meMarker.getElement() && meMarker.getElement().querySelector('.me-dot');
+  if (dot) dot.classList.remove('stale');
+  _meStaleTimer = setTimeout(() => { const d = meMarker && meMarker.getElement() && meMarker.getElement().querySelector('.me-dot'); if (d) d.classList.add('stale'); }, 15000);
 }
 
 function editFromMap(id) {
@@ -3348,17 +3414,14 @@ function viderPanier() {
 /* ═══════════ CONFIG MODIFIABLE (page Réglages) ═══════════ */
 const CONFIG_DEFAULT = {
   lists: {
-    typeSupport:   ['Mât droit','Console','Potence','Candélabre','Encastré sol','Façade'],
-    etatSupport:   ['Bon','Moyen','Mauvais','À remplacer'],
-    typeAttache:   ['Bride','Crosse','Platine','Direct'],
-    typeLuminaire: ['Lanterne','Projecteur','Hublot','Borne','Applique','Globe'],
-    etatLuminaire: ['Bon','Moyen','Mauvais','À remplacer'],
-    technologie:   ['LED','Sodium HP','Sodium BP','Iodures métalliques','Fluo compact','Inconnue'],
-    armEtatExt:    ['Bon','Moyen','Mauvais','À remplacer'],
-    armEtatInt:    ['Bon','Moyen','Mauvais','À remplacer'],
-    armCable:      ['Aérien','Souterrain','Mixte'],
-    armProtection: ['Disjoncteur','Fusible','Interrupteur différentiel','Autre'],
-    armHorloge:    ['Horloge astronomique','Télégestion','Cellule photoélectrique','Manuel','Aucun'],
+    etatSupport: ['BON', 'MOYEN', 'VETUSTE', 'MANQUANT', 'ACCIDENTE'],
+    etatLuminaire: ['BON', 'MOYEN', 'VETUSTE', 'MANQUANT', 'ACCIDENTE'],
+    technologie: ['SHP', 'IM', 'CW', 'SBP', 'LED', 'TF', 'VM', 'HAL', 'FC', 'Lampe LED', 'AUTRE'],
+    typeLuminaire: ['ROUTIERE', 'RESIDENTIEL', 'STYLE', 'AMBIANCE', 'BOULE', 'BORNE', 'ENCASTRE_DE_SOL', 'PROJECTEUR', 'PROJECTEUR_SPORTIF', 'APPLIQUE_MURALE', 'AUTRE', 'SOLAIRE'],
+    hauteur: ['0m', '1m', '2m', '3m', '4m', '5m', '6m', '7m', '8m', '9m', '10m & +', 'Non définis'],
+    typeAttache: ['AUCUNE', 'CONSOLE', 'SIMPLE', 'DOUBLE', 'TRIPLE', 'QUADRUPLE'],
+    typeSupport: ['CANDELABRE_DROIT', 'CANDELABRE_SIMPLE_CROSSE', 'CANDELABRE_DOUBLE_CROSSE', 'CANDELABRE_TRIPLE_CROSSE', 'CANDELABRE_QUADRUPLE_CROSSE', 'CONSOLE_SUR_SUPPORT_EP', 'CONSOLE_SUR_SUPPORT_ENEDIS', 'CONSOLE_SUR_SUPPORT_AUTRE', 'CONSOLE_SUR_FACADE', 'BORNE', 'SOL_ENCASTRE', 'MUR_ENCASTRE', 'COLONNE_LUMINEUSE'],
+    cableAlim: ['Aérien', 'Souterrain', 'Mixte']
   },
   customFields: [
     { key: 'solaire', label: 'Solaire', column: 'Solaire', type: 'select',
@@ -3671,12 +3734,104 @@ const TPL_FIELDS = ['f-nbr-supports','f-type-support','f-etat-support','f-hauteu
   'f-type-attache','f-nbr-luminaires','f-type-luminaire','f-etat-luminaire',
   'f-technologie','f-puissance'];
 
+// ══════════ TRAMES DEPUIS L'ONGLET "Trames" DU SHEET (tableau lisible) ══════════
+let SHEET_TEMPLATES = [];   // trames lues dans l'onglet Trames (gérées à la main dans le Sheet)
+
+// Colonnes de l'onglet Trames → champ de fiche. Plusieurs libellés acceptés (tolérant accents/casse).
+const TRAME_COL_MAP = [
+  { field:'f-nbr-supports',   names:['nbr supports','nombre de supports','nb supports'] },
+  { field:'f-type-support',   names:['types de support','type de support','support'] },
+  { field:'f-etat-support',   names:['etat du support','état du support','etat support'] },
+  { field:'f-hauteur',        names:['hauteur','hauteur (m)'] },
+  { field:'f-type-attache',   names:["types d'attache","type d'attache","attache"] },
+  { field:'f-nbr-luminaires', names:['nbr luminaires','nombre de luminaires','nb luminaires'] },
+  { field:'f-type-luminaire', names:['types de luminaire','type de luminaire','type luminaire'] },
+  { field:'f-etat-luminaire', names:['etat luminaires','état luminaires','etat du luminaire','etat luminaire'] },
+  { field:'f-technologie',    names:['technologie','techno'] },
+  { field:'f-puissance',      names:['puissance','puissance (w)','watt','w'] },
+];
+// Colonnes → champ personnalisé (custom, par nom de colonne du Sheet)
+const TRAME_CUSTOM_MAP = [
+  { col:'Gamme luminaire',      names:['gamme du luminaire','gamme luminaire','gamme'] },
+  { col:'Marque luminaire',     names:['marque du luminaire','marque luminaire','marque'] },
+  { col:'Catégorie Lampadaire', names:['categorie lampadaire','catégorie lampadaire'] },
+];
+function _normHead(x){ return String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,''); }
+// Transforme un lien Google Drive en URL d'image directe (miniature). Sinon renvoie l'URL telle quelle.
+function driveImageUrl(raw){
+  const v = String(raw||'').trim();
+  if (!v) return '';
+  const m = v.match(/\/d\/([-\w]{20,})/) || v.match(/[?&]id=([-\w]{20,})/);
+  if (m) return 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w400';
+  return v;
+}
+// Vignette d'une trame : image si dispo (avec repli 💡 si le lien ne charge pas), sinon icône.
+function tplThumbHTML(t){
+  if (t.thumb) {
+    return '<img class="tpl-thumb" src="' + t.thumb + '" alt="" referrerpolicy="no-referrer" ' +
+      'onerror="this.style.display=\'none\';var f=this.nextElementSibling;if(f)f.style.display=\'flex\'">' +
+      '<div class="tpl-thumb" style="display:none">💡</div>';
+  }
+  return '<div class="tpl-thumb">💡</div>';
+}
+function _findHeaderKey(row, names){
+  const idx = {}; Object.keys(row).forEach(k => { idx[_normHead(k)] = k; });
+  for (const nm of names){ const k = idx[_normHead(nm)]; if (k!==undefined) return k; }
+  return null;
+}
+async function loadTemplatesFromSheets(silent){
+  if (!navigator.onLine) return;
+  try {
+    const res = await fetch(SCRIPT_URL + '?sheet=Trames');   // pas de filtre chantier : trames globales
+    const data = await res.json();
+    if (data.error) { if (String(data.error).indexOf('not found') >= 0) return; throw new Error(data.error); }
+    const rows = data.rows || [];
+    if (!rows.length) { SHEET_TEMPLATES = []; return; }
+    // repère la colonne "nom de la trame" (Catégorie / Nom / Trame)
+    const nameKey = _findHeaderKey(rows[0], ['categorie','catégorie','nom','trame','nom de la trame']);
+    const out = [];
+    rows.forEach(r => {
+      const name = String(nameKey ? r[nameKey] : (r['Catégorie'] || r['Nom'] || '')).trim();
+      if (!name) return;
+      const values = {};
+      TRAME_COL_MAP.forEach(m => {
+        const k = _findHeaderKey(r, m.names);
+        if (k!==null && String(r[k]).trim() !== '') values[m.field] = String(r[k]).trim();
+      });
+      const custom = {};
+      TRAME_CUSTOM_MAP.forEach(m => {
+        const k = _findHeaderKey(r, m.names);
+        if (k!==null && String(r[k]).trim() !== '') custom[m.col] = String(r[k]).trim();
+      });
+      const photoKey = _findHeaderKey(r, ['photo','lien photo','photo url','image','lien image','url photo']);
+      const photoUrl = photoKey!==null ? driveImageUrl(r[photoKey]) : '';
+      const prev = (CONFIG.templates || []).find(t => t.name.toLowerCase() === name.toLowerCase());
+      out.push({ key:'sheet_'+slugify(name), name, fromSheet:true,
+                 color: prev ? prev.color : null,
+                 thumb: photoUrl || (prev ? prev.thumb : null),
+                 values, custom });
+    });
+    SHEET_TEMPLATES = out;
+    renderTemplatesBar();
+    if (typeof renderMasseTplBar === 'function') renderMasseTplBar();
+    if (currentScreen === 'settings') renderSettings();
+    if (!silent && out.length) showToast(out.length + ' trame(s) chargée(s) depuis le Sheet ✓', 'success');
+  } catch (e) { console.warn('load trames:', e); }
+}
+// Union : trames du Sheet (tableau) + trames créées dans l'app, sans doublon de nom.
+function getAllTemplates(){
+  const seen = new Set(); const out = [];
+  SHEET_TEMPLATES.forEach(t => { const k=t.name.toLowerCase(); if(!seen.has(k)){seen.add(k); out.push(t);} });
+  (CONFIG.templates||[]).forEach(t => { const k=t.name.toLowerCase(); if(!seen.has(k)){seen.add(k); out.push(t);} });
+  return out;
+}
+
 function renderTemplatesBar() {
   const bar = document.getElementById('tpl-bar');
   if (!bar) return;
-  let html = (CONFIG.templates || []).map((t, i) => `
+  let html = getAllTemplates().map((t, i) => `
     <div class="tpl-card" style="${t.color ? 'border:2px solid ' + t.color : ''}" onclick="applyTemplate(${i})">
-      ${t.thumb ? `<img class="tpl-thumb" src="${t.thumb}" alt="">` : `<div class="tpl-thumb">💡</div>`}
+      ${tplThumbHTML(t)}
       <div class="tpl-name">${escapeHtml(t.name)}</div>
     </div>`).join('');
   html += `
@@ -3687,7 +3842,7 @@ function renderTemplatesBar() {
   bar.innerHTML = html;
 }
 function applyTemplate(i) {
-  const t = (CONFIG.templates || [])[i];
+  const t = getAllTemplates()[i];
   if (!t) return;
   Object.entries(t.values || {}).forEach(([id, v]) => {
     const el = document.getElementById(id);
@@ -3820,6 +3975,15 @@ function saveTemplateEdit(i) {
   window._editTpl = null;
   saveConfig(); renderSettings(); renderTemplatesBar();
   showToast('Trame « ' + t.name + ' » enregistrée', 'success');
+}
+function sheetTplColor(name, color){
+  const t = SHEET_TEMPLATES.find(x => x.name === name);
+  if (t) t.color = color;
+  // mémorise la couleur via une entrée légère dans CONFIG.templates (sans valeurs) pour persister
+  let c = (CONFIG.templates||[]).find(x => x.name.toLowerCase() === name.toLowerCase());
+  if (!c) { c = { key:'clr_'+slugify(name), name, color, thumb:null, values:{}, custom:{}, colorOnly:true }; CONFIG.templates.push(c); }
+  else c.color = color;
+  saveConfig(); renderTemplatesBar(); renderSettings();
 }
 function tplColorChanged(i, color) {
   CONFIG.templates[i].color = color;
@@ -4032,6 +4196,21 @@ function renderSettings() {
   </div>`;
 
   html += '<div class="set-section-title">Trames de fiche (point lumineux)</div>';
+  if (SHEET_TEMPLATES.length) {
+    html += '<div class="set-card">';
+    html += '<div class="set-empty" style="margin-bottom:8px">' + SHEET_TEMPLATES.length + ' trame(s) gérée(s) dans l\u2019onglet <b>Trames</b> du Sheet (ajout/suppression directement dans le tableau) :</div>';
+    SHEET_TEMPLATES.forEach(t => {
+      const nb = Object.keys(t.values||{}).length + Object.keys(t.custom||{}).length;
+      html += `<div class="set-tpl-row">
+        <div class="set-tpl-thumb">📄</div>
+        <div style="flex:1;min-width:0"><div class="set-color-label" style="font-weight:600">${escapeHtml(t.name)}</div>
+        <div class="set-empty">${nb} caractéristique(s) · depuis le Sheet</div></div>
+        <input type="color" class="set-color" style="width:34px;height:30px" value="${t.color || '#38bdf8'}" onchange="sheetTplColor('${escapeHtml(t.name)}', this.value)" title="Couleur de l'encadré">
+      </div>`;
+    });
+    html += '</div>';
+  }
+  html += '<div class="set-section-title" style="font-size:13px;opacity:.8">Trames créées dans l\u2019app</div>';
   html += '<div class="set-card">';
   if (!(CONFIG.templates || []).length) {
     html += '<div class="set-empty">Aucune trame. Dans une fiche point, remplis les champs types puis touche « ＋ Trame depuis la fiche ».</div>';
@@ -4335,16 +4514,16 @@ const FIELD_TO_KEY = {
 function renderMasseTplBar() {
   const bar = document.getElementById('masse-tpl-bar');
   if (!bar) return;
-  const tpls = CONFIG.templates || [];
-  if (!tpls.length) { bar.innerHTML = '<div class="set-empty" style="padding:8px">Aucune trame — créez-en dans Réglages.</div>'; return; }
+  const tpls = getAllTemplates();
+  if (!tpls.length) { bar.innerHTML = '<div class="set-empty" style="padding:8px">Aucune trame — créez-en dans Réglages ou dans l\u2019onglet « Trames » du Sheet.</div>'; return; }
   bar.innerHTML = tpls.map((t, i) => `
     <div class="tpl-card" style="${t.color ? 'border:2px solid ' + t.color : ''}" onclick="applyTemplateToSelection(${i})">
-      ${t.thumb ? `<img class="tpl-thumb" src="${t.thumb}" alt="">` : `<div class="tpl-thumb">💡</div>`}
+      ${tplThumbHTML(t)}
       <div class="tpl-name">${escapeHtml(t.name)}</div>
     </div>`).join('');
 }
 async function applyTemplateToSelection(i) {
-  const t = (CONFIG.templates || [])[i];
+  const t = getAllTemplates()[i];
   if (!t) return;
   const targets = state.points.filter(p => p.dansPanier);
   if (!targets.length) { showToast('Aucun point sélectionné', 'error'); return; }
@@ -4750,6 +4929,7 @@ async function loadFromSheets(silent) {
     }
     await loadArmoiresFromSheets(silent);   // redescend aussi les armoires du Sheet
     await syncConfigWithSheets(silent);     // réglages partagés (trames, listes, couleurs…)
+    await loadTemplatesFromSheets(silent);  // trames du tableau "Trames" du Sheet
     flushSyncQueue();                    // pousse les points locaux en attente
   } finally {
     isLoading = false;
