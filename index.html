@@ -776,6 +776,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="diag-actions">
       <button class="diag-export" onclick="exportAll()">Export CSV</button>
       <button class="diag-export" onclick="exportPhotos()" style="background:var(--green);color:#06281a">Photos (ZIP)</button>
+      <button class="diag-close" onclick="clearTileCache()" style="background:#3a2a12;color:#fbbf24">Vider les cartes</button>
       <button class="diag-close" onclick="closeDiag()">Fermer</button>
     </div>
   </div>
@@ -814,6 +815,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
     <div class="field-group">
       <label class="field-label">Chantier</label>
+      <button type="button" class="mfp-btn" onclick="deleteChantierFromLogin()" style="width:100%;margin-top:8px;border-color:#f8717155;color:#f87171">🗑 Supprimer le chantier sélectionné</button>
       <select class="field-select" id="login-chantier" onchange="if(this.value==='__new'){addChantierFromLogin(this)}">
         <option value="">-- Sélectionner --</option>
       </select>
@@ -835,6 +837,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <button class="ob-btn" style="color:#f87171;border-color:#f87171" onclick="removeOverlay(true)">🗑</button>
   </div>
   <div class="topbar">
+    <div class="icon-btn" onclick="backToLogin()" title="Changer de chantier / se déconnecter" style="margin-right:8px">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3H4v12h7"/><path d="M8 9h8M13 6l3 3-3 3"/></svg>
+    </div>
     <div>
       <div class="topbar-title" id="map-chantier-label">Chantier</div>
       <div class="topbar-sub" id="map-technicien-label">Technicien</div>
@@ -851,7 +856,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   <div id="map-filter-panel">
     <div class="mfp-head">
       <button class="mfp-btn" id="mfp-all-btn" onclick="toggleAllArmoiresFilter()">Tout sélectionner</button>
-      <button class="mfp-btn" onclick="clearArmoireFilter()">Tout effacer</button>
       <button class="mfp-btn" onclick="toggleFilterPanel()">Fermer ✕</button>
     </div>
     <div class="mfp-list" id="mfp-list"></div>
@@ -1114,7 +1118,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v50</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v53</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -1605,19 +1609,26 @@ function lat2tile(lat, z) { const r = lat * Math.PI / 180; return Math.floor((1 
 // réelles faites sous "b." ou "c." une fois hors ligne → trous sur la carte.
 const TILE_SUBDOMAINS = ['a', 'b', 'c'];
 function tileSubdomain(x, y) { return TILE_SUBDOMAINS[Math.abs(x + y) % TILE_SUBDOMAINS.length]; }
+function precacheTileUrl(z, x, y) {
+  if (baseMode === 1) return 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX=' + z + '&TILEROW=' + y + '&TILECOL=' + x;
+  if (baseMode === 2) return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/' + z + '/' + y + '/' + x;
+  return 'https://' + tileSubdomain(x, y) + '.tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png';
+}
 async function precacheVisibleArea() {
   if (!map) return;
   if (!navigator.onLine) { showToast('Préchargement impossible hors réseau', 'error'); return; }
   const b = map.getBounds();
   // Du zoom actuel JUSQU'AU zoom terrain (19) : indispensable pour repérer les mâts de près hors ligne.
   const z0 = Math.max(14, Math.round(map.getZoom()));
+  const zMaxCap = (baseMode === 2) ? 18 : 19;   // Esri : pas de tuiles au-delà de 18
+  const fondNom = baseMode === 1 ? 'Satellite IGN' : (baseMode === 2 ? 'Satellite Esri' : 'Plan');
   const zooms = [];
-  for (let z = z0; z <= 19; z++) zooms.push(z);
+  for (let z = z0; z <= zMaxCap; z++) zooms.push(z);
   const urls = [];
   zooms.forEach((z) => {
     const xMin = lon2tile(b.getWest(), z), xMax = lon2tile(b.getEast(), z);
     const yMin = lat2tile(b.getNorth(), z), yMax = lat2tile(b.getSouth(), z);
-    for (let x = xMin; x <= xMax; x++) for (let y = yMin; y <= yMax; y++) urls.push('https://' + tileSubdomain(x, y) + '.tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png');
+    for (let x = xMin; x <= xMax; x++) for (let y = yMin; y <= yMax; y++) urls.push(precacheTileUrl(z, x, y));
   });
   if (!urls.length) { showToast('Zone vide', 'error'); return; }
   if (urls.length > 6000 && !confirm('Zone étendue : ' + urls.length + ' tuiles (jusqu\u2019au zoom terrain). Cela peut prendre quelques minutes. Zoomer sur une zone plus petite, ou confirmer ?')) return;
@@ -1884,6 +1895,15 @@ async function loadLocalArmoires() {
 
 // ── LOGIN ──
 // ── Chantiers dynamiques (liste partagée entre appareils via la Config) ──
+function backToLogin() {
+  if (!confirm('Revenir à la page de connexion ?\n(Vos données restent enregistrées et synchronisées.)')) return;
+  document.querySelectorAll('.screen').forEach(sc => sc.classList.remove('active'));
+  const lg = document.getElementById('screen-login');
+  lg.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(nv => nv.classList.remove('active'));
+  const bn = document.getElementById('bottom-nav'); if (bn) bn.style.display = 'none';
+  populateChantierSelect('');
+}
 function populateChantierSelect(selected) {
   const sel = document.getElementById('login-chantier');
   if (!sel) return;
@@ -1893,6 +1913,16 @@ function populateChantierSelect(selected) {
     list.map(c => `<option${c === selected ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('') +
     '<option value="__new">＋ Nouveau chantier…</option>';
   if (selected) sel.value = selected;
+}
+async function deleteChantierFromLogin() {
+  const sel = document.getElementById('login-chantier');
+  const name = sel.value;
+  if (!name || name === '__new') { showToast('Sélectionnez d\u2019abord un chantier', 'error'); return; }
+  if (!confirm('Retirer le chantier « ' + name + ' » de la liste ?\n\nLes points et photos déjà dans le Sheet ne sont PAS supprimés — seul le chantier disparaît de la liste de connexion.')) return;
+  CONFIG.chantiers = (CONFIG.chantiers || CONFIG_DEFAULT.chantiers).filter(c => c !== name);
+  await saveConfig();
+  populateChantierSelect('');
+  showToast('Chantier « ' + name + ' » retiré de la liste', 'success');
 }
 async function addChantierFromLogin(sel) {
   const name = (prompt('Nom du nouveau chantier (commune) :') || '').trim();
@@ -3332,7 +3362,10 @@ const CONFIG_DEFAULT = {
   },
   customFields: [
     { key: 'solaire', label: 'Solaire', column: 'Solaire', type: 'select',
-      options: ['Solaire faisable', 'Solaire infaisable', 'Solaire à projeter'] }
+      options: ['Solaire faisable', 'Solaire infaisable', 'Solaire à projeter'] },
+    { key: 'categorielampadaire', label: 'Catégorie Lampadaire', column: 'Catégorie Lampadaire', type: 'text', options: [] },
+    { key: 'marqueluminaire', label: 'Marque luminaire', column: 'Marque luminaire', type: 'text', options: [] },
+    { key: 'gammeluminaire', label: 'Gamme luminaire', column: 'Gamme luminaire', type: 'text', options: [] }
   ],
   armCustomFields: [],  // champs personnalisés des armoires (onglet Armoires)
   colorField: 'etatSupport', // quel champ du point déclenche la couleur sur la carte
@@ -4801,6 +4834,15 @@ async function syncPointToSheets(pt) {
     updateStatus();
     if (navigator.onLine) scheduleSyncRetry(); // erreur serveur, pas juste hors-ligne
   }
+}
+
+async function clearTileCache() {
+  if (!confirm('Vider les cartes téléchargées ?\n\nCela libère de l\u2019espace. Vos points, photos et réglages ne sont PAS touchés.\nIl faudra re-précharger les zones pour les revoir hors ligne.')) return;
+  try {
+    await caches.delete('audit-ep-tiles-v1');
+    const el = document.getElementById('d-tiles'); if (el) el.textContent = '0';
+    showToast('Cartes téléchargées vidées ✓', 'success');
+  } catch (e) { showToast('Impossible de vider le cache', 'error'); }
 }
 
 // ── VIDER la file d'attente hors-ligne ──
