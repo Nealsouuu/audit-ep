@@ -864,6 +864,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <button class="mfp-btn" id="mfp-all-btn" onclick="toggleAllArmoiresFilter()">Tout sélectionner</button>
       <button class="mfp-btn" onclick="toggleFilterPanel()">Fermer ✕</button>
     </div>
+    <input type="text" id="mfp-search" placeholder="🔍 Rechercher une armoire…" oninput="renderFilterPanel()"
+      style="width:100%;box-sizing:border-box;padding:8px 10px;margin:6px 0;border:1px solid var(--border2);border-radius:8px;background:var(--bg1,#0f172a);color:var(--text);font-size:13px">
     <div class="mfp-list" id="mfp-list"></div>
   </div>
   <div class="map-controls">
@@ -1127,7 +1129,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v57</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v59</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2182,15 +2184,17 @@ function finishLasso() {
   map.getContainer().classList.remove('lasso-on');
   map.dragging.enable(); map.doubleClickZoom.enable(); if (map.touchZoom) map.touchZoom.enable();
   if (poly.length < 3) { showToast('Tracé trop court', 'error'); return; }
-  let count = 0;
-  state.points.forEach(p => {
-    if (p.lat == null || p.lng == null) return;
-    if (pointInPoly(p.lat, p.lng, poly)) { p.dansPanier = true; count++; }
-  });
+  const inside = state.points.filter(p => p.lat != null && p.lng != null
+    && (!state.chantier || String(p.chantier || '') === String(state.chantier))
+    && pointInPoly(p.lat, p.lng, poly));
+  if (!inside.length) { showToast('Aucun point dans la zone', ''); return; }
+  const tousDeja = inside.every(p => p.dansPanier);
+  inside.forEach(p => { p.dansPanier = !tousDeja; });
   saveLocal();
   refreshMapMarkers();
-  if (count) { showToast(count + ' point' + (count > 1 ? 's' : '') + ' sélectionné' + (count > 1 ? 's' : ''), 'success'); openModalMasseChoice(); }
-  else showToast('Aucun point dans la zone', '');
+  const nSel = state.points.filter(p => p.dansPanier).length;
+  if (tousDeja) showToast(inside.length + ' point(s) retiré(s) — ' + nSel + ' au total', '');
+  else { showToast(inside.length + ' point(s) ajouté(s) — ' + nSel + ' au total', 'success'); if (nSel) openModalMasseChoice(); }
 }
 
 /* ════════ Déplacement groupé (glisser tous les points du panier d'un même vecteur) ════════
@@ -2516,12 +2520,30 @@ function cancelCalibration() {
   calibWaitMap = false; calibPts = []; calibLL = []; calibImg = null;
 }
 
+// Un point est "solaire" si son champ perso Solaire est renseigné (hors 'infaisable'),
+// ou si sa technologie/type de luminaire mentionne le solaire.
+function isSolarPoint(pt){
+  const sol = (pt.custom && (pt.custom['Solaire'] || pt.custom['solaire'])) || '';
+  if (sol && !/infaisable/i.test(sol)) return true;
+  return /solaire/i.test(String(pt.technologie||'')) || /solaire/i.test(String(pt.typeLuminaire||''));
+}
+// Rond par défaut ; étoile pour les points solaires.
+function markerShapeHTML(pt, color){
+  if (isSolarPoint(pt)) {
+    return '<svg width="18" height="18" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))">' +
+      '<path d="M12 2l2.9 6.3 6.9.7-5.1 4.7 1.4 6.8L12 17.8 5.9 20.5l1.4-6.8L2.2 9l6.9-.7z" ' +
+      'fill="' + color.fill + '" stroke="' + color.border + '" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+  }
+  return '<div style="width:14px;height:14px;border-radius:50%;background:' + color.fill + ';border:2px solid ' + color.border + ';box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>';
+}
 function getMarkerColor(pt) {
   const colors = (CONFIG && CONFIG.colors) || {};
   const dfl = colors._default || { fill: '#38bdf8', border: '#ffffff' };
   if (pt.dansPanier) return { fill: '#fb923c', border: '#ffffff' };
   const field = (CONFIG && CONFIG.colorField) || 'etatSupport';
-  const val = pt[field] || '';
+  let val;
+  if (field.indexOf('custom:') === 0) { const col = field.slice(7); val = (pt.custom && pt.custom[col]) || ''; }
+  else { val = pt[field] || ''; }
   if (val && colors[val]) return colors[val];
   return dfl;
 }
@@ -2532,7 +2554,7 @@ let _armIdsSorted = [];
 function _filterSet() { return new Set((state.filterArmoire || []).map(String)); }
 function populateArmoireFilter() {
   const ids = new Set();
-  const okC = x => !x || !x.chantier || String(x.chantier) === String(state.chantier);
+  const okC = x => !state.chantier || String((x && x.chantier) || '') === String(state.chantier);
   state.armoires.forEach(a => { if (a.id && okC(a)) ids.add(String(a.id)); });
   state.points.forEach(p => { if (p.idArmoire && okC(p)) ids.add(String(p.idArmoire)); });
   const sorted = [...ids].sort();
@@ -2558,10 +2580,12 @@ function renderFilterPanel() {
   const sel = _filterSet();
   const allBtn = document.getElementById('mfp-all-btn');
   if (allBtn) allBtn.textContent = (_armIdsSorted.length && sel.size >= _armIdsSorted.length) ? 'Tout désélectionner' : 'Tout sélectionner';
-  list.innerHTML = _armIdsSorted.map(id => `
+  const q = (document.getElementById('mfp-search')?.value || '').toLowerCase().trim();
+  const shown = q ? _armIdsSorted.filter(id => id.toLowerCase().includes(q)) : _armIdsSorted;
+  list.innerHTML = shown.map(id => `
     <div class="mfp-item${sel.has(id) ? ' on' : ''}" onclick="toggleArmoireInFilter('${escapeHtml(id)}')">
       <span>${escapeHtml(id)}</span><span class="mfp-check">${sel.has(id) ? '✓' : ''}</span>
-    </div>`).join('') || '<div class="set-empty" style="padding:8px">Aucune armoire</div>';
+    </div>`).join('') || '<div class="set-empty" style="padding:8px">' + (q ? 'Aucune armoire « ' + escapeHtml(q) + ' »' : 'Aucune armoire') + '</div>';
 }
 function toggleFilterPanel() {
   document.getElementById('map-filter-panel').classList.toggle('show');
@@ -2612,14 +2636,10 @@ function refreshMapMarkers() {
   const ptMarkers = [];
   state.points.forEach(pt => {
     if (!pt.lat || !pt.lng) return;
-    if (state.chantier && pt.chantier && String(pt.chantier) !== String(state.chantier)) return;
+    if (state.chantier && String(pt.chantier || '') !== String(state.chantier)) return;
     if (state.filterArmoire.length && !state.filterArmoire.includes(String(pt.idArmoire))) return;
     const color = getMarkerColor(pt);
-    const icon = L.divIcon({
-      className: '',
-      html: `<div style="width:14px;height:14px;border-radius:50%;background:${color.fill};border:2px solid ${color.border};box-shadow:0 2px 6px rgba(0,0,0,0.4)"></div>`,
-      iconSize: [14,14], iconAnchor: [7,7]
-    });
+    const icon = L.divIcon({ className: '', html: markerShapeHTML(pt, color), iconSize: [18,18], iconAnchor: [9,9] });
     const marker = L.marker([pt.lat, pt.lng], { icon });
     marker.bindPopup(`
       <div class="popup-id">${escapeHtml(pt.id)}</div>
@@ -2642,7 +2662,7 @@ function refreshMapMarkers() {
   // Marqueurs armoires (carré orange avec éclair)
   state.armoires.forEach(arm => {
     if (!arm.lat || !arm.lng) return;
-    if (state.chantier && arm.chantier && String(arm.chantier) !== String(state.chantier)) return;
+    if (state.chantier && String(arm.chantier || '') !== String(state.chantier)) return;
     if (state.filterArmoire.length && !state.filterArmoire.includes(String(arm.id))) return;
     const nbPts = state.points.filter(p => String(p.idArmoire || '').trim() === String(arm.id).trim()).length;
     const icon = L.divIcon({
@@ -3414,14 +3434,15 @@ function viderPanier() {
 /* ═══════════ CONFIG MODIFIABLE (page Réglages) ═══════════ */
 const CONFIG_DEFAULT = {
   lists: {
-    etatSupport: ['BON', 'MOYEN', 'VETUSTE', 'MANQUANT', 'ACCIDENTE'],
-    etatLuminaire: ['BON', 'MOYEN', 'VETUSTE', 'MANQUANT', 'ACCIDENTE'],
-    technologie: ['SHP', 'IM', 'CW', 'SBP', 'LED', 'TF', 'VM', 'HAL', 'FC', 'Lampe LED', 'AUTRE'],
-    typeLuminaire: ['ROUTIERE', 'RESIDENTIEL', 'STYLE', 'AMBIANCE', 'BOULE', 'BORNE', 'ENCASTRE_DE_SOL', 'PROJECTEUR', 'PROJECTEUR_SPORTIF', 'APPLIQUE_MURALE', 'AUTRE', 'SOLAIRE'],
+    etatSupport: ['BON', 'MOYEN', 'VETUSTE', 'INÉVALUABLE', 'ACCIDENTE', 'MANQUANT'],
+    etatLuminaire: ['BON', 'MOYEN', 'VETUSTE', 'INÉVALUABLE', 'ACCIDENTE', 'MANQUANT'],
+    technologie: ['SHP', 'BF', 'IM', 'LED', 'CW', 'SBP', 'Ampoule LED', 'TF', 'VM', 'HAL', 'FC', 'AUTRE'],
+    typeLuminaire: ['Fonctionnel', 'Résidentiel', 'Piétonnier', 'Design', 'Solaire', 'Balisage', 'Mise en valeur', 'ROUTIERE', 'AMBIANCE', 'BOULE', 'BORNE', 'PROJECTEUR', 'AUTRE'],
     hauteur: ['0m', '1m', '2m', '3m', '4m', '5m', '6m', '7m', '8m', '9m', '10m & +', 'Non définis'],
-    typeAttache: ['AUCUNE', 'CONSOLE', 'SIMPLE', 'DOUBLE', 'TRIPLE', 'QUADRUPLE'],
-    typeSupport: ['CANDELABRE_DROIT', 'CANDELABRE_SIMPLE_CROSSE', 'CANDELABRE_DOUBLE_CROSSE', 'CANDELABRE_TRIPLE_CROSSE', 'CANDELABRE_QUADRUPLE_CROSSE', 'CONSOLE_SUR_SUPPORT_EP', 'CONSOLE_SUR_SUPPORT_ENEDIS', 'CONSOLE_SUR_SUPPORT_AUTRE', 'CONSOLE_SUR_FACADE', 'BORNE', 'SOL_ENCASTRE', 'MUR_ENCASTRE', 'COLONNE_LUMINEUSE'],
-    cableAlim: ['Aérien', 'Souterrain', 'Mixte']
+    typeAttache: ['Top', 'Crosse', 'Sans attache', 'Contre-feu', 'AUCUNE', 'CONSOLE', 'SIMPLE', 'DOUBLE', 'TRIPLE', 'QUADRUPLE'],
+    typeSupport: ['Mât', 'PBA', 'Mur façade', 'Contre-feu', 'Borne', 'Plot', 'Spot', 'Colonne', 'Mât droit', 'Console', 'Potence', 'Candélabre', 'Encastré sol', 'Façade', 'Sol'],
+    cableAlim: ['Aérien', 'Souterrain', 'Mixte'],
+    etatCable: ['BON', 'MOYEN', 'VETUSTE']
   },
   customFields: [
     { key: 'solaire', label: 'Solaire', column: 'Solaire', type: 'select',
@@ -3841,13 +3862,20 @@ function renderTemplatesBar() {
     </div>`;
   bar.innerHTML = html;
 }
+function _normVal(x){ return String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,''); }
+function setFieldValueSmart(el, v){
+  if (!el) return;
+  if (el.tagName === 'SELECT') {
+    const want = _normVal(v);
+    let match = [...el.options].find(o => _normVal(o.value || o.textContent) === want);
+    if (!match && want) { match = new Option(String(v), String(v)); el.add(match); }
+    el.value = match ? (match.value || match.textContent) : '';
+  } else { el.value = v; }
+}
 function applyTemplate(i) {
   const t = getAllTemplates()[i];
   if (!t) return;
-  Object.entries(t.values || {}).forEach(([id, v]) => {
-    const el = document.getElementById(id);
-    if (el) el.value = v;
-  });
+  Object.entries(t.values || {}).forEach(([id, v]) => setFieldValueSmart(document.getElementById(id), v));
   Object.entries(t.custom || {}).forEach(([col, v]) => {
     const el = document.querySelector('#custom-fields-pl [data-col="' + CSS.escape(col) + '"]');
     if (el) setFieldEl(el, v);
@@ -4154,6 +4182,7 @@ function toggleSection(el) {
   renderSettings();
 }
 function renderSettings() {
+  setTimeout(() => { try { refreshTilesInfo(); } catch(e){} }, 60);
   const box = document.getElementById('settings-body');
   if (!box) return;
   let html = '<div class="set-section-title">Listes de choix</div>';
@@ -4174,11 +4203,20 @@ function renderSettings() {
   html += '<div class="set-section-title">Champs personnalisés (nouvelles colonnes)</div>';
   if (!CONFIG.customFields.length) html += '<div class="set-empty" style="padding:0 4px 8px">Aucun champ personnalisé pour le moment.</div>';
   CONFIG.customFields.forEach((cf, i) => {
-    const meta = cf.type === 'select' ? ('liste : ' + (cf.options || []).join(', ')) : (cf.type === 'multi' ? ('choix multiples : ' + (cf.options || []).join(', ')) : 'texte libre');
+    const typeLabel = cf.type === 'select' ? 'Liste de choix' : (cf.type === 'multi' ? 'Choix multiples' : 'Texte libre');
+    let optChips = '';
+    if (cf.type === 'select' || cf.type === 'multi') {
+      optChips = '<div class="set-chips">' + (cf.options || []).map((o, oi) =>
+        `<span class="set-chip">${escapeHtml(o)}<span class="set-chip-x" onclick="removeCustomOption(${i},${oi})">×</span></span>`
+      ).join('') + '</div><div class="set-add"><input class="set-input" id="addcfopt-' + i + '" placeholder="Nouvelle option…"><button class="set-btn" onclick="addCustomOption(' + i + ')">Ajouter</button></div>';
+    }
     html += `<div class="set-card">
-      <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ colonne « ${escapeHtml(cf.column)} »</span></div>
-      <div class="set-empty">${escapeHtml(meta)}</div>
-      <div class="set-add"><button class="set-btn set-btn-del" onclick="removeCustomField(${i})">Supprimer ce champ</button></div>
+      <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ « ${escapeHtml(cf.column)} » · ${typeLabel}</span></div>
+      ${optChips}
+      <div class="set-add">
+        <button class="set-btn" onclick="renameCustomField(${i})">✏️ Renommer</button>
+        <button class="set-btn set-btn-del" onclick="removeCustomField(${i})">Supprimer</button>
+      </div>
     </div>`;
   });
   html += `<div class="set-card">
@@ -4236,6 +4274,17 @@ function renderSettings() {
   html += '<div class="set-add" style="margin-top:10px"><button class="set-btn" onclick="newTemplateFromSettings()">＋ Nouvelle trame</button></div>';
   html += '</div>';
 
+  html += '<div class="set-section-title">Cartes hors-ligne</div>';
+  html += `<div class="set-card">
+    <div class="set-empty" style="margin-bottom:8px">Cartes téléchargées pour une utilisation sans réseau. Le préchargement se fait depuis la carte (bouton de téléchargement), selon le fond affiché.</div>
+    <div class="set-color-row"><span class="set-color-label">Tuiles en cache</span><span id="set-tiles-count" style="font-weight:600">—</span></div>
+    <div class="set-color-row"><span class="set-color-label">Espace estimé</span><span id="set-tiles-size" style="font-weight:600">—</span></div>
+    <div class="set-add" style="margin-top:8px">
+      <button class="set-btn" onclick="refreshTilesInfo()">Actualiser</button>
+      <button class="set-btn set-btn-del" onclick="clearTileCache().then(refreshTilesInfo)">Vider les cartes</button>
+    </div>
+  </div>`;
+
   html += '<div class="set-section-title">Importer des points (chantier : ' + escapeHtml(state.chantier || '?') + ')</div>';
   html += `<div class="set-card">
     <div class="set-empty" style="margin-bottom:8px">Collez les points du SIG : une ligne par point, <b>ID ; X ; Y</b> (séparateur ; , ou tabulation). Les coordonnées Lambert-93 et Coniques Conformes (CC42-CC50) sont converties automatiquement en GPS.</div>
@@ -4274,13 +4323,25 @@ function renderSettings() {
 
   html += '<div class="set-section-title">Couleurs des points sur la carte</div>';
   html += '<div class="set-card">';
+  // Champs disponibles pour déclencher la couleur : toutes les listes + champs perso de type liste
+  const colorChoices = LIST_FIELDS.slice();
+  (CONFIG.customFields || []).forEach(cf => {
+    if (cf.type === 'select' || cf.type === 'multi') colorChoices.push({ key: 'custom:' + cf.column, label: cf.label, custom: true, column: cf.column });
+  });
+  window._colorChoices = colorChoices;
   html += '<div class="set-color-row"><span class="set-color-label">Couleur déclenchée par</span>' +
     '<select class="set-input" style="width:auto;flex:1;margin-left:8px" onchange="setColorField(this.value)">' +
-    LIST_FIELDS.map(f => `<option value="${f.key}"${CONFIG.colorField === f.key ? ' selected' : ''}>${escapeHtml(f.label)}</option>`).join('') +
+    colorChoices.map(f => `<option value="${f.key}"${CONFIG.colorField === f.key ? ' selected' : ''}>${escapeHtml(f.label)}</option>`).join('') +
     '</select></div>';
-  const colorFieldDef = LIST_FIELDS.find(f => f.key === CONFIG.colorField) || LIST_FIELDS[1];
+  const colorFieldDef = colorChoices.find(f => f.key === CONFIG.colorField) || colorChoices[0];
   html += `<div class="set-empty" style="margin:6px 0 10px">Selon « ${escapeHtml(colorFieldDef.label)} » de chaque point — intérieur et contour réglables séparément.</div>`;
-  (CONFIG.lists[CONFIG.colorField] || []).forEach((val, i) => {
+  let _colorVals;
+  if (String(CONFIG.colorField).indexOf('custom:') === 0) {
+    const col = CONFIG.colorField.slice(7);
+    const cf = (CONFIG.customFields || []).find(c => c.column === col);
+    _colorVals = (cf && cf.options) || [];
+  } else { _colorVals = CONFIG.lists[CONFIG.colorField] || []; }
+  _colorVals.forEach((val, i) => {
     const c = (CONFIG.colors && CONFIG.colors[val]) || (CONFIG.colors && CONFIG.colors._default) || { fill: '#38bdf8', border: '#ffffff' };
     html += `<div class="set-color-row">
       <span class="set-color-label">${escapeHtml(val)}</span>
@@ -4370,6 +4431,28 @@ function slugify(s) {
   return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || ('champ_' + Date.now());
 }
+function renameCustomField(i){
+  const cf = CONFIG.customFields[i]; if (!cf) return;
+  const v = (prompt('Nouveau nom affiché du champ :', cf.label) || '').trim();
+  if (!v) return;
+  cf.label = v;   // on garde la même colonne Sheet pour ne pas perdre les données déjà saisies
+  saveConfig(); renderSettings();
+  showToast('Champ renommé', 'success');
+}
+function addCustomOption(i){
+  const cf = CONFIG.customFields[i]; if (!cf) return;
+  const inp = document.getElementById('addcfopt-' + i);
+  const v = (inp && inp.value || '').trim();
+  if (!v) return;
+  cf.options = cf.options || [];
+  if (!cf.options.includes(v)) cf.options.push(v);
+  saveConfig(); renderSettings();
+}
+function removeCustomOption(i, oi){
+  const cf = CONFIG.customFields[i]; if (!cf || !cf.options) return;
+  cf.options.splice(oi, 1);
+  saveConfig(); renderSettings();
+}
 function addCustomField() {
   const label = (document.getElementById('cf-new-label').value || '').trim();
   if (!label) { showToast('Donne un nom au champ', 'error'); return; }
@@ -4419,7 +4502,13 @@ function setStateColor(etat, color, channel) {
   renderPanier();
 }
 function setStateColorByIndex(i, color, channel) {
-  const val = (CONFIG.lists[CONFIG.colorField] || [])[i];
+  let _cv;
+  if (String(CONFIG.colorField).indexOf('custom:') === 0) {
+    const col = CONFIG.colorField.slice(7);
+    const cf = (CONFIG.customFields || []).find(c => c.column === col);
+    _cv = (cf && cf.options) || [];
+  } else { _cv = CONFIG.lists[CONFIG.colorField] || []; }
+  const val = _cv[i];
   if (val) setStateColor(val, color, channel);
 }
 function setColorField(field) {
@@ -4522,6 +4611,13 @@ function renderMasseTplBar() {
       <div class="tpl-name">${escapeHtml(t.name)}</div>
     </div>`).join('');
 }
+const _FID_LIST = { 'f-type-support':'typeSupport','f-etat-support':'etatSupport','f-type-attache':'typeAttache','f-type-luminaire':'typeLuminaire','f-etat-luminaire':'etatLuminaire','f-technologie':'technologie','f-hauteur':'hauteur' };
+function _resolveOption(fid, v){
+  const listKey = _FID_LIST[fid];
+  if (!listKey || !CONFIG.lists[listKey]) return v;
+  const want = _normVal(v);
+  return CONFIG.lists[listKey].find(o => _normVal(o) === want) || v;
+}
 async function applyTemplateToSelection(i) {
   const t = getAllTemplates()[i];
   if (!t) return;
@@ -4530,7 +4626,7 @@ async function applyTemplateToSelection(i) {
   targets.forEach(p => {
     Object.entries(t.values || {}).forEach(([fid, v]) => {
       const key = FIELD_TO_KEY[fid];
-      if (key) p[key] = v;
+      if (key) p[key] = _resolveOption(fid, v);
     });
     if (t.custom && Object.keys(t.custom).length) {
       p.custom = Object.assign({}, p.custom || {}, t.custom);
@@ -5016,6 +5112,21 @@ async function syncPointToSheets(pt) {
   }
 }
 
+async function refreshTilesInfo(){
+  try {
+    const c = await caches.open('audit-ep-tiles-v1');
+    const keys = await c.keys();
+    const el = document.getElementById('set-tiles-count'); if (el) el.textContent = keys.length + ' tuile(s)';
+    // estimation : ~12 Ko/tuile en moyenne
+    const mb = (keys.length * 12 / 1024).toFixed(1);
+    const es = document.getElementById('set-tiles-size'); if (es) es.textContent = '~ ' + mb + ' Mo';
+    // si l'API de stockage existe, on affiche le vrai chiffre
+    if (navigator.storage && navigator.storage.estimate) {
+      const est = await navigator.storage.estimate();
+      if (est && est.usage && es) es.textContent = '~ ' + (est.usage/1048576).toFixed(0) + ' Mo (total app)';
+    }
+  } catch (e) {}
+}
 async function clearTileCache() {
   if (!confirm('Vider les cartes téléchargées ?\n\nCela libère de l\u2019espace. Vos points, photos et réglages ne sont PAS touchés.\nIl faudra re-précharger les zones pour les revoir hors ligne.')) return;
   try {
