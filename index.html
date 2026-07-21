@@ -850,6 +850,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   <button class="map-filter" id="map-filter-btn" onclick="toggleFilterPanel()">Toutes les armoires</button>
   <div id="map-filter-panel">
     <div class="mfp-head">
+      <button class="mfp-btn" id="mfp-all-btn" onclick="toggleAllArmoiresFilter()">Tout sélectionner</button>
       <button class="mfp-btn" onclick="clearArmoireFilter()">Tout effacer</button>
       <button class="mfp-btn" onclick="toggleFilterPanel()">Fermer ✕</button>
     </div>
@@ -1113,7 +1114,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v49</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v50</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2515,6 +2516,8 @@ function renderFilterPanel() {
   const list = document.getElementById('mfp-list');
   if (!list) return;
   const sel = _filterSet();
+  const allBtn = document.getElementById('mfp-all-btn');
+  if (allBtn) allBtn.textContent = (_armIdsSorted.length && sel.size >= _armIdsSorted.length) ? 'Tout désélectionner' : 'Tout sélectionner';
   list.innerHTML = _armIdsSorted.map(id => `
     <div class="mfp-item${sel.has(id) ? ' on' : ''}" onclick="toggleArmoireInFilter('${escapeHtml(id)}')">
       <span>${escapeHtml(id)}</span><span class="mfp-check">${sel.has(id) ? '✓' : ''}</span>
@@ -2523,6 +2526,15 @@ function renderFilterPanel() {
 function toggleFilterPanel() {
   document.getElementById('map-filter-panel').classList.toggle('show');
   renderFilterPanel();
+}
+function toggleAllArmoiresFilter() {
+  const all = _armIdsSorted.slice();
+  const tousCoches = all.length && (state.filterArmoire || []).length >= all.length;
+  state.filterArmoire = tousCoches ? [] : all;   // si déjà tout coché → tout décocher
+  _filterSig = '';
+  refreshMapMarkers();
+  renderFilterPanel();
+  zoomToArmoireFilter();
 }
 function toggleArmoireInFilter(id) {
   const arr = state.filterArmoire || (state.filterArmoire = []);
