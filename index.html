@@ -1129,7 +1129,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v60</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v62</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2188,13 +2188,21 @@ function finishLasso() {
     && (!state.chantier || String(p.chantier || '') === String(state.chantier))
     && pointInPoly(p.lat, p.lng, poly));
   if (!inside.length) { showToast('Aucun point dans la zone', ''); return; }
-  const tousDeja = inside.every(p => p.dansPanier);
-  inside.forEach(p => { p.dansPanier = !tousDeja; });
+  // Bascule point par point : ceux hors panier entrent, ceux déjà dedans sortent.
+  let ajoutes = 0, retires = 0;
+  inside.forEach(p => {
+    if (p.dansPanier) { p.dansPanier = false; retires++; }
+    else { p.dansPanier = true; ajoutes++; }
+  });
   saveLocal();
   refreshMapMarkers();
   const nSel = state.points.filter(p => p.dansPanier).length;
-  if (tousDeja) showToast(inside.length + ' point(s) retiré(s) — ' + nSel + ' au total', '');
-  else { showToast(inside.length + ' point(s) ajouté(s) — ' + nSel + ' au total', 'success'); if (nSel) openModalMasseChoice(); }
+  let msg = [];
+  if (ajoutes) msg.push(ajoutes + ' ajouté(s)');
+  if (retires) msg.push(retires + ' retiré(s)');
+  showToast((msg.join(' · ') || 'Aucun changement') + ' — ' + nSel + ' au total', ajoutes ? 'success' : '');
+  // ouvre le menu d'action seulement si on a ajouté ET qu'il reste une sélection
+  if (ajoutes && nSel) openModalMasseChoice();
 }
 
 /* ════════ Déplacement groupé (glisser tous les points du panier d'un même vecteur) ════════
@@ -4075,6 +4083,7 @@ async function deleteSheetTemplate(si){
 // Réécrit tout l'onglet Trames depuis SHEET_TEMPLATES
 async function pushSheetTemplates(){
   if (!navigator.onLine) { showToast('Hors ligne — modification enregistrée au retour du réseau', 'error'); return; }
+  if (!SHEET_TEMPLATES.length) { showToast('Aucune trame à écrire — opération annulée par sécurité', 'error'); return; }  // anti-effacement
   const headers = ['Catégorie','Nbr supports','Types de support','État du support','Hauteur',
     "Types d'attache",'Nbr Luminaires','Types de luminaire','État luminaires','Technologie','Puissance',
     'Gamme du luminaire','Marque du luminaire','Photo'];
@@ -4109,7 +4118,7 @@ async function sheetTplPhoto(si, input){
     if (r.error) throw new Error(r.error);
     t.photoUrl = r.url;
     t.thumb = driveImageUrl(r.url);
-    await pushSheetTemplates();
+    // le serveur a déjà inscrit le lien dans la cellule Photo → on ne réécrit PAS tout le tableau
     renderSettings(); renderTemplatesBar();
     showToast('Photo de trame enregistrée dans Drive ✓', 'success');
   } catch (e) { showToast('Échec photo trame : ' + e.message, 'error'); }
