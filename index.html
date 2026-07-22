@@ -1129,7 +1129,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v59</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v60</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -4004,6 +4004,116 @@ function saveTemplateEdit(i) {
   saveConfig(); renderSettings(); renderTemplatesBar();
   showToast('Trame « ' + t.name + ' » enregistrée', 'success');
 }
+// Champs éditables d'une trame du tableau
+const SHEET_TPL_FIELDS = [
+  ['f-type-support','Type de support','typeSupport'],
+  ['f-etat-support','État du support','etatSupport'],
+  ['f-hauteur','Hauteur','hauteur'],
+  ['f-type-attache',"Type d'attache",'typeAttache'],
+  ['f-nbr-luminaires','Nbr luminaires',null],
+  ['f-type-luminaire','Type de luminaire','typeLuminaire'],
+  ['f-etat-luminaire','État luminaires','etatLuminaire'],
+  ['f-technologie','Technologie','technologie'],
+  ['f-puissance','Puissance',null],
+];
+function editSheetTemplate(si){
+  window._editSheetTpl = (window._editSheetTpl === si) ? null : si;
+  _openSections.add('Trames de fiche (point lumineux)');
+  renderSettings();
+}
+function renderSheetTemplateEditor(t, si){
+  let h = '<div class="set-card" style="border-color:var(--accent)">';
+  h += '<div class="set-card-title">Modifier « ' + escapeHtml(t.name) + ' »</div>';
+  h += '<div class="form-label" style="margin-top:6px">Nom</div><input class="set-input" id="stpe-name" value="' + escapeHtml(t.name) + '" style="margin-bottom:8px">';
+  SHEET_TPL_FIELDS.forEach(([fid,label,listKey]) => {
+    const cur = (t.values||{})[fid] || '';
+    h += '<div class="form-label" style="margin-top:6px">' + escapeHtml(label) + '</div>';
+    if (listKey && CONFIG.lists[listKey]) {
+      const opts = ['<option value="">--</option>'].concat(CONFIG.lists[listKey].map(o => '<option' + (o===cur?' selected':'') + '>' + escapeHtml(o) + '</option>'));
+      if (cur && !CONFIG.lists[listKey].includes(cur)) opts.push('<option selected>' + escapeHtml(cur) + '</option>');
+      h += '<select class="set-input" id="stpe-' + fid + '" style="margin-bottom:6px">' + opts.join('') + '</select>';
+    } else {
+      h += '<input class="set-input" id="stpe-' + fid + '" value="' + escapeHtml(cur) + '" style="margin-bottom:6px">';
+    }
+  });
+  // champs perso (Gamme, Marque…)
+  (CONFIG.customFields||[]).forEach(cf => {
+    const cur = (t.custom||{})[cf.column] || '';
+    h += '<div class="form-label" style="margin-top:6px">' + escapeHtml(cf.label) + '</div>';
+    h += '<input class="set-input" id="stpec-' + cf.key + '" data-col="' + escapeHtml(cf.column) + '" value="' + escapeHtml(cur) + '" style="margin-bottom:6px">';
+  });
+  h += '<div class="set-add" style="margin-top:10px">';
+  h += '<button class="set-btn" onclick="saveSheetTemplateEdit(' + si + ')" style="background:#4ade80;color:#04222e">Enregistrer dans le Sheet</button>';
+  h += '<button class="set-mini" style="width:auto;padding:0 12px" onclick="window._editSheetTpl=null;renderSettings()">Annuler</button>';
+  h += '<button class="set-mini" style="width:auto;padding:0 12px;color:#f87171;border-color:#f87171" onclick="deleteSheetTemplate(' + si + ')">Supprimer</button>';
+  h += '</div></div>';
+  return h;
+}
+async function saveSheetTemplateEdit(si){
+  const t = SHEET_TEMPLATES[si]; if (!t) return;
+  const name = (document.getElementById('stpe-name').value||'').trim();
+  if (name) t.name = name;
+  const values = {};
+  SHEET_TPL_FIELDS.forEach(([fid]) => { const el = document.getElementById('stpe-'+fid); if (el && el.value) values[fid] = el.value; });
+  const custom = {};
+  (CONFIG.customFields||[]).forEach(cf => { const el = document.getElementById('stpec-'+cf.key); if (el && el.value) custom[cf.column] = el.value; });
+  t.values = values; t.custom = custom;
+  window._editSheetTpl = null;
+  await pushSheetTemplates();
+  renderSettings(); renderTemplatesBar();
+  showToast('Trame « ' + t.name + ' » enregistrée dans le Sheet', 'success');
+}
+async function deleteSheetTemplate(si){
+  const t = SHEET_TEMPLATES[si]; if (!t) return;
+  if (!confirm('Supprimer la trame « ' + t.name + ' » du tableau ?')) return;
+  SHEET_TEMPLATES.splice(si, 1);
+  window._editSheetTpl = null;
+  await pushSheetTemplates();
+  renderSettings(); renderTemplatesBar();
+  showToast('Trame supprimée', '');
+}
+// Réécrit tout l'onglet Trames depuis SHEET_TEMPLATES
+async function pushSheetTemplates(){
+  if (!navigator.onLine) { showToast('Hors ligne — modification enregistrée au retour du réseau', 'error'); return; }
+  const headers = ['Catégorie','Nbr supports','Types de support','État du support','Hauteur',
+    "Types d'attache",'Nbr Luminaires','Types de luminaire','État luminaires','Technologie','Puissance',
+    'Gamme du luminaire','Marque du luminaire','Photo'];
+  const F = { supNbr:'f-nbr-supports', supType:'f-type-support', supEtat:'f-etat-support', haut:'f-hauteur',
+    att:'f-type-attache', lumNbr:'f-nbr-luminaires', lumType:'f-type-luminaire', lumEtat:'f-etat-luminaire',
+    tech:'f-technologie', puis:'f-puissance' };
+  const rows = SHEET_TEMPLATES.map(t => {
+    const v = t.values||{}, c = t.custom||{};
+    return [ t.name, v[F.supNbr]||'', v[F.supType]||'', v[F.supEtat]||'', v[F.haut]||'',
+      v[F.att]||'', v[F.lumNbr]||'', v[F.lumType]||'', v[F.lumEtat]||'', v[F.tech]||'', v[F.puis]||'',
+      c['Gamme luminaire']||'', c['Marque luminaire']||'', t.photoUrl||'' ];
+  });
+  try {
+    const res = await fetch(SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({ action:'saveTrames', headers, rows }) });
+    const r = await res.json();
+    if (r.error) throw new Error(r.error);
+  } catch (e) { showToast('Échec écriture Trames : ' + e.message, 'error'); }
+}
+// Photo d'une trame du tableau : upload Drive → dossier "Photos de trame" → lien dans la colonne Photo
+async function sheetTplPhoto(si, input){
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const t = SHEET_TEMPLATES[si]; if (!t) return;
+  showToast('Envoi de la photo…', '');
+  try {
+    const blob = await downscaleToBlob(file);
+    const b64 = await blobToBase64(blob);
+    const res = await fetch(SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({ action:'tramePhoto', name:t.name, data:b64, mime:'image/jpeg' }) });
+    const r = await res.json();
+    if (r.error) throw new Error(r.error);
+    t.photoUrl = r.url;
+    t.thumb = driveImageUrl(r.url);
+    await pushSheetTemplates();
+    renderSettings(); renderTemplatesBar();
+    showToast('Photo de trame enregistrée dans Drive ✓', 'success');
+  } catch (e) { showToast('Échec photo trame : ' + e.message, 'error'); }
+}
 function sheetTplColor(name, color){
   const t = SHEET_TEMPLATES.find(x => x.name === name);
   if (t) t.color = color;
@@ -4237,14 +4347,19 @@ function renderSettings() {
   if (SHEET_TEMPLATES.length) {
     html += '<div class="set-card">';
     html += '<div class="set-empty" style="margin-bottom:8px">' + SHEET_TEMPLATES.length + ' trame(s) gérée(s) dans l\u2019onglet <b>Trames</b> du Sheet (ajout/suppression directement dans le tableau) :</div>';
-    SHEET_TEMPLATES.forEach(t => {
+    SHEET_TEMPLATES.forEach((t, si) => {
       const nb = Object.keys(t.values||{}).length + Object.keys(t.custom||{}).length;
       html += `<div class="set-tpl-row">
-        <div class="set-tpl-thumb">📄</div>
+        ${t.thumb ? `<img class="set-tpl-thumb" src="${t.thumb}" alt="">` : `<div class="set-tpl-thumb">📄</div>`}
         <div style="flex:1;min-width:0"><div class="set-color-label" style="font-weight:600">${escapeHtml(t.name)}</div>
         <div class="set-empty">${nb} caractéristique(s) · depuis le Sheet</div></div>
         <input type="color" class="set-color" style="width:34px;height:30px" value="${t.color || '#38bdf8'}" onchange="sheetTplColor('${escapeHtml(t.name)}', this.value)" title="Couleur de l'encadré">
+        <label class="set-mini" style="display:flex;align-items:center;justify-content:center;cursor:pointer" title="Photo (rangée dans Drive)">📷
+          <input type="file" accept="image/*" style="display:none" onchange="sheetTplPhoto(${si}, this)">
+        </label>
+        <button class="set-mini" onclick="editSheetTemplate(${si})" title="Modifier">✏️</button>
       </div>`;
+      if (window._editSheetTpl === si) html += renderSheetTemplateEditor(t, si);
     });
     html += '</div>';
   }
