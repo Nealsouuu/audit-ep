@@ -1129,7 +1129,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v62</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v63</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -4965,7 +4965,10 @@ function _cfgTabMissing(e) {
     showToast('Ajoutez un onglet « Config » dans le Sheet pour partager les réglages', 'error');
   }
 }
+let _configPushing = false;
+let _configDirty = false;
 async function pushConfigToSheets() {
+  _configPushing = true; _configDirty = true;
   if (!navigator.onLine) return;   // repoussé par la synchro suivante (horodatage local plus récent)
   try {
     const json = JSON.stringify(CONFIG);
@@ -4981,9 +4984,11 @@ async function pushConfigToSheets() {
     const r = await res.json();
     if (r.error) throw new Error(r.error);
   } catch (e) { console.warn('push config:', e); _cfgTabMissing(e); }
+  finally { _configPushing = false; }
 }
 async function syncConfigWithSheets(silent) {
   if (!navigator.onLine) return;
+  if (_configPushing) return;   // une écriture locale est en cours → on ne lit pas maintenant
   try {
     const res = await fetch(SCRIPT_URL + '?sheet=Config');
     const data = await res.json();
@@ -4996,10 +5001,32 @@ async function syncConfigWithSheets(silent) {
       let json = '';
       for (let i = 1; i <= 20; i++) json += String(row['JSON' + i] || '');
       const parsed = JSON.parse(json);
+      // FUSION ADDITIVE des listes et options : on ne perd jamais une option ajoutée localement.
+      const localLists = JSON.parse(JSON.stringify(CONFIG.lists || {}));
+      const localCF = JSON.parse(JSON.stringify(CONFIG.customFields || []));
+      if (parsed.lists) {
+        Object.keys(localLists).forEach(k => {
+          const merged = (parsed.lists[k] || []).slice();
+          localLists[k].forEach(o => { if (!merged.includes(o)) merged.push(o); });
+          parsed.lists[k] = merged;
+        });
+      }
+      if (Array.isArray(parsed.customFields)) {
+        localCF.forEach(lcf => {
+          const rcf = parsed.customFields.find(c => c.column === lcf.column);
+          if (rcf && Array.isArray(lcf.options)) {
+            rcf.options = rcf.options || [];
+            lcf.options.forEach(o => { if (!rcf.options.includes(o)) rcf.options.push(o); });
+          } else if (!rcf) {
+            parsed.customFields.push(lcf);   // champ perso créé localement, absent du serveur
+          }
+        });
+      }
       await DB.put('meta', { k: 'config', v: parsed });
-      await loadConfig();                          // fusion + application immédiate
+      await loadConfig();
+      if (_configDirty) pushConfigToSheets();      // on repartage la version fusionnée
       if (currentScreen === 'settings') renderSettings();
-      if (!silent) showToast('Réglages synchronisés depuis le Sheet ✓', 'success');
+      if (!silent) showToast('Réglages synchronisés ✓', 'success');
     } else if (localTs > remoteTs) {
       pushConfigToSheets();                        // cet appareil est plus récent → il partage
     }
