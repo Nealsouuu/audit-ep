@@ -1129,7 +1129,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v63</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v64</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -5058,12 +5058,32 @@ function mapServerRow(r) {
     lat: parseFloat(r['Latitude']) || null,
     dansPanier: r['Dans le Panier'] === 'TRUE' || r['Dans le Panier'] === true,
     aDeposer: String(colVal(r, 'À déposer') || '').toUpperCase() === 'OUI',
+    _categorieSheet: String(colVal(r, 'Catégorie') || '').trim(),
     chantier: r['Chantier'] || '',
     technicien: r['Technicien'] || '',
     date: r['Date'] || '',
     custom: custom,
     photos: {}
   };
+}
+// Applique les valeurs d'une trame à un point pour ses champs restés vides (non destructif).
+function applyCategorieToPoint(pt){
+  const name = pt._categorieSheet || (pt.custom && pt.custom['Catégorie']) || '';
+  if (!name) return pt;
+  const t = (typeof getAllTemplates === 'function') ? getAllTemplates().find(x => x.name.toLowerCase() === String(name).toLowerCase()) : null;
+  if (!t) return pt;
+  const F2K = { 'f-nbr-supports':'nbrSupports','f-type-support':'typeSupport','f-etat-support':'etatSupport','f-hauteur':'hauteur','f-type-attache':'typeAttache','f-nbr-luminaires':'nbrLuminaires','f-type-luminaire':'typeLuminaire','f-etat-luminaire':'etatLuminaire','f-technologie':'technologie','f-puissance':'puissance' };
+  Object.entries(t.values || {}).forEach(([fid, v]) => {
+    const k = F2K[fid];
+    if (k && (pt[k] === '' || pt[k] == null)) pt[k] = (typeof _resolveOption === 'function') ? _resolveOption(fid, v) : v;
+  });
+  Object.entries(t.custom || {}).forEach(([col, v]) => {
+    if (!pt.custom) pt.custom = {};
+    if (pt.custom[col] === '' || pt.custom[col] == null) pt.custom[col] = v;
+  });
+  if (!pt.custom) pt.custom = {};
+  if (!pt.custom['Catégorie']) pt.custom['Catégorie'] = name;
+  return pt;
 }
 // ── Polling automatique : reflète les modifs faites dans le Sheet (ajouts ET suppressions) ──
 let pollTimer = null, isLoading = false;
@@ -5119,7 +5139,7 @@ async function loadFromSheets(silent) {
       (data.rows || []).forEach(r => {
         const id = String(r['ID'] || '');
         if (!id || byId.has(id) || tombstones.has(id)) return;
-        byId.set(id, mapServerRow(r));
+        byId.set(id, applyCategorieToPoint(mapServerRow(r)));
         added++;
       });
 
@@ -5133,7 +5153,7 @@ async function loadFromSheets(silent) {
         if (!id || tombstones.has(id) || pendingIds.has(id)) return;
         const existing = byId.get(id);
         if (!existing) return; // pas encore en local → déjà géré par l'ajout ci-dessus
-        const fresh = mapServerRow(r);
+        const fresh = applyCategorieToPoint(mapServerRow(r));
         fresh.photos = existing.photos;       // indicateurs photos gérés en local (IndexedDB), pas dans le Sheet
         fresh.dansPanier = existing.dansPanier; // le panier est une sélection LOCALE : jamais écrasée par le serveur
         const changed = fresh.lat !== existing.lat || fresh.lng !== existing.lng
