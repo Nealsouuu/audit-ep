@@ -694,7 +694,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .ord-item{display:flex;align-items:center;gap:8px;cursor:grab;background:var(--bg2,#1e293b);border-radius:8px;margin-bottom:4px;padding:6px 8px}
 .ord-item.ord-drag{opacity:.5;border:1px dashed var(--accent)}
 .ord-grip{color:#64748b;font-size:16px;cursor:grab;touch-action:none;padding:0 2px}
-#map-champ-panel{position:absolute;top:calc(env(safe-area-inset-top) + 108px);right:10px;z-index:1000;width:min(300px,86vw);background:rgba(15,23,42,.97);backdrop-filter:blur(8px);border:1px solid var(--border2);border-radius:12px;padding:10px;display:none}
+#map-champ-panel{position:absolute;top:calc(env(safe-area-inset-top) + 152px);left:10px;z-index:1000;width:min(300px,86vw);background:rgba(15,23,42,.97);backdrop-filter:blur(8px);border:1px solid var(--border2);border-radius:12px;padding:10px;display:none}
 #map-champ-panel.show{display:block}
 .set-caret{display:inline-block;width:16px;color:var(--accent)}
 .multi-chips{display:flex;flex-wrap:wrap;gap:7px;padding:4px 0}
@@ -864,7 +864,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   </div>
   <div id="map"></div>
   <button class="map-filter" id="map-filter-btn" onclick="toggleFilterPanel()">Toutes les armoires</button>
-  <button class="map-filter" id="map-champ-btn" onclick="toggleChampPanel()" style="left:auto;right:10px">Filtre caractéristique</button>
+  <button class="map-filter" id="map-champ-btn" onclick="toggleChampPanel()" style="top:calc(env(safe-area-inset-top) + 108px)">Filtre caractéristique</button>
   <div id="map-champ-panel">
     <div class="mfp-head">
       <button class="mfp-btn" onclick="clearChampFilter()">Effacer</button>
@@ -1149,7 +1149,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v70</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v71</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -3639,6 +3639,18 @@ async function loadConfig() {
   if (!Array.isArray(CONFIG.orderPL)) CONFIG.orderPL = [];
   if (!Array.isArray(CONFIG.orderARM)) CONFIG.orderARM = [];
   if (!Array.isArray(CONFIG.templates)) CONFIG.templates = [];
+  // Doublons de champs personnalisés (accumulés au fil des fusions) → on ne garde que le premier
+  ['customFields', 'armCustomFields'].forEach(prop => {
+    if (!Array.isArray(CONFIG[prop])) return;
+    const vus = new Set(); const propres = [];
+    CONFIG[prop].forEach(cf => {
+      const cle = String(cf.column || cf.key || '').toLowerCase().trim();
+      if (!cle || vus.has(cle)) return;
+      vus.add(cle);
+      propres.push(cf);
+    });
+    if (propres.length !== CONFIG[prop].length) CONFIG[prop] = propres;
+  });
   if (!CONFIG.updatedAt) {
     // Config d'avant le partage : horodatage NEUTRE (1) — elle peut amorcer l'onglet Config
     // s'il est vide, mais ne peut JAMAIS écraser une config réellement enregistrée ailleurs.
@@ -3693,6 +3705,11 @@ function renderCustomFields() {
       const chips = (cf.options || []).map(o => `<span class="mchip" data-v="${escapeHtml(o)}" onclick="toggleChip(this)">${escapeHtml(o)}</span>`).join('');
       return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><div class="multi-chips" id="${id}" data-col="${col}">${chips}</div></div>`;
     }
+    if (cf.type === 'trames') {
+      const noms = (typeof getAllTemplates === 'function' ? getAllTemplates() : []).map(t => t.name);
+      const optsT = '<option value=""></option>' + noms.map(o => `<option>${escapeHtml(o)}</option>`).join('');
+      return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><select class="form-select" id="${id}" data-col="${col}">${optsT}</select></div>`;
+    }
     if (cf.type === 'select') {
       const opts = '<option value=""></option>' + (cf.options || []).map(o => `<option>${escapeHtml(o)}</option>`).join('');
       return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><select class="form-select" id="${id}" data-col="${col}">${opts}</select></div>`;
@@ -3717,6 +3734,11 @@ function renderArmCustomFields() {
     if (cf.type === 'multi') {
       const chips = (cf.options || []).map(o => `<span class="mchip" data-v="${escapeHtml(o)}" onclick="toggleChip(this)">${escapeHtml(o)}</span>`).join('');
       return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><div class="multi-chips" id="${id}" data-col="${col}">${chips}</div></div>`;
+    }
+    if (cf.type === 'trames') {
+      const noms = (typeof getAllTemplates === 'function' ? getAllTemplates() : []).map(t => t.name);
+      const optsT = '<option value=""></option>' + noms.map(o => `<option>${escapeHtml(o)}</option>`).join('');
+      return `<div class="form-row"><div class="form-label">${escapeHtml(cf.label)}</div><select class="form-select" id="${id}" data-col="${col}">${optsT}</select></div>`;
     }
     if (cf.type === 'select') {
       const opts = '<option value=""></option>' + (cf.options || []).map(o => `<option>${escapeHtml(o)}</option>`).join('');
@@ -4540,9 +4562,13 @@ function renderSettings() {
   html += '<div class="set-section-title">Champs personnalisés (nouvelles colonnes)</div>';
   if (!CONFIG.customFields.length) html += '<div class="set-empty" style="padding:0 4px 8px">Aucun champ personnalisé pour le moment.</div>';
   CONFIG.customFields.forEach((cf, i) => {
-    const typeLabel = cf.type === 'select' ? 'Liste de choix' : (cf.type === 'multi' ? 'Choix multiples' : 'Texte libre');
+    const typeLabel = cf.type === 'select' ? 'Liste de choix'
+      : (cf.type === 'multi' ? 'Choix multiples'
+      : (cf.type === 'trames' ? 'Liste des trames (auto)' : 'Texte libre'));
     let optChips = '';
-    if (cf.type === 'select' || cf.type === 'multi') {
+    if (cf.type === 'trames') {
+      optChips = '<div class="set-empty">Les choix sont les noms de vos trames — mis à jour automatiquement.</div>';
+    } else if (cf.type === 'select' || cf.type === 'multi') {
       optChips = '<div class="set-chips">' + (cf.options || []).map((o, oi) =>
         `<span class="set-chip">${escapeHtml(o)}<span class="set-chip-x" onclick="removeCustomOption(${i},${oi})">×</span></span>`
       ).join('') + '</div><div class="set-add"><input class="set-input" id="addcfopt-' + i + '" placeholder="Nouvelle option…"><button class="set-btn" onclick="addCustomOption(' + i + ')">Ajouter</button></div>';
@@ -4555,6 +4581,7 @@ function renderSettings() {
           <option value="text"${cf.type === 'text' ? ' selected' : ''}>Texte libre</option>
           <option value="select"${cf.type === 'select' ? ' selected' : ''}>Liste de choix</option>
           <option value="multi"${cf.type === 'multi' ? ' selected' : ''}>Choix multiples</option>
+          <option value="trames"${cf.type === 'trames' ? ' selected' : ''}>Liste des trames (auto)</option>
         </select>
         <button class="set-btn" onclick="renameCustomField(${i})">✏️ Renommer</button>
         <button class="set-btn set-btn-del" onclick="removeCustomField(${i})">Supprimer</button>
