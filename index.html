@@ -873,8 +873,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div style="padding:6px 2px">
       <div class="form-label">Caractéristique</div>
       <select class="set-input" id="champ-field" onchange="renderChampValues()" style="margin-bottom:8px"></select>
-      <div class="form-label">Valeur</div>
-      <select class="set-input" id="champ-value" style="margin-bottom:8px"></select>
+      <div class="form-label">Valeurs <span id="champ-count" style="opacity:.6"></span></div>
+      <button class="mfp-btn" id="champ-all-btn" style="width:100%;margin-bottom:6px" onclick="toggleAllChampValues()">Tout sélectionner</button>
+      <div class="mfp-list" id="champ-values" style="max-height:34vh;margin-bottom:8px"></div>
       <button class="set-btn" style="width:100%" onclick="applyChampFilter()">Appliquer le filtre</button>
     </div>
   </div>
@@ -1148,7 +1149,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v69</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v70</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2621,13 +2622,14 @@ function renderFilterPanel() {
 /* ═══ FILTRE PAR CARACTÉRISTIQUE (champ + valeur) ═══ */
 function champFilterOK(pt) {
   const f = state.filterChamp;
-  if (!f || !f.field) return true;
+  if (!f || !f.field || !f.values || !f.values.length) return true;
   const def = masseFieldById(f.field);
   if (!def) return true;
-  const v = def.custom ? ((pt.custom && pt.custom[def.custom]) || '') : (pt[def.key] || '');
-  if (f.value === '__vide') return String(v).trim() === '';
-  return _normVal(v) === _normVal(f.value);
+  const v = String(def.custom ? ((pt.custom && pt.custom[def.custom]) || '') : (pt[def.key] || '')).trim();
+  return f.values.some(x => x === '__vide' ? v === '' : _normVal(v) === _normVal(x));
 }
+let _champSel = new Set();      // valeurs cochées dans le panneau
+let _champListe = [];           // valeurs proposées
 function toggleChampPanel() {
   const p = document.getElementById('map-champ-panel');
   p.classList.toggle('show');
@@ -2641,32 +2643,55 @@ function renderChampFields() {
     .map(d => `<option value="${escapeHtml(d.id)}"${d.id === cur ? ' selected' : ''}>${escapeHtml(d.label)}</option>`).join('');
   renderChampValues();
 }
-function renderChampValues() {
+function renderChampValues(garderSelection) {
   const fSel = document.getElementById('champ-field');
-  const vSel = document.getElementById('champ-value');
-  if (!fSel || !vSel) return;
+  const box = document.getElementById('champ-values');
+  if (!fSel || !box) return;
   const def = masseFieldById(fSel.value);
-  // valeurs réellement présentes sur le chantier + options de la liste
   const vues = new Set();
   state.points.forEach(p => {
     if (state.chantier && String(p.chantier || '') !== String(state.chantier)) return;
     const v = def && def.custom ? ((p.custom && p.custom[def.custom]) || '') : (def ? (p[def.key] || '') : '');
     if (String(v).trim() !== '') vues.add(String(v).trim());
   });
-  (def && def.options ? def.options : []).forEach(o => vues.add(o));
-  const cur = state.filterChamp ? state.filterChamp.value : '';
-  const liste = [...vues].sort((a, b) => a.localeCompare(b, 'fr'));
-  vSel.innerHTML = liste.map(v => `<option${v === cur ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('')
-    + `<option value="__vide"${cur === '__vide' ? ' selected' : ''}>— (non renseigné) —</option>`;
+  (def && def.options ? def.options : []).forEach(o => { if (String(o).trim()) vues.add(String(o).trim()); });
+  _champListe = [...vues].sort((a, b) => a.localeCompare(b, 'fr'));
+  _champListe.push('__vide');
+  if (!garderSelection) {
+    // si le filtre actif porte sur ce champ, on recoche ses valeurs
+    _champSel = new Set(
+      (state.filterChamp && state.filterChamp.field === fSel.value) ? state.filterChamp.values : []);
+  }
+  box.innerHTML = _champListe.map(v => `
+    <div class="mfp-item${_champSel.has(v) ? ' on' : ''}" onclick="toggleChampValue('${escapeHtml(v).replace(/'/g, "\\'")}')">
+      <span>${v === '__vide' ? '— (non renseigné) —' : escapeHtml(v)}</span>
+      <span class="mfp-check">${_champSel.has(v) ? '✓' : ''}</span>
+    </div>`).join('') || '<div class="set-empty" style="padding:8px">Aucune valeur</div>';
+  const cnt = document.getElementById('champ-count');
+  if (cnt) cnt.textContent = _champSel.size ? '(' + _champSel.size + ' sélectionnée' + (_champSel.size > 1 ? 's' : '') + ')' : '';
+  const btn = document.getElementById('champ-all-btn');
+  if (btn) btn.textContent = (_champListe.length && _champSel.size >= _champListe.length) ? 'Tout désélectionner' : 'Tout sélectionner';
+}
+function toggleChampValue(v) {
+  if (_champSel.has(v)) _champSel.delete(v); else _champSel.add(v);
+  renderChampValues(true);
+}
+function toggleAllChampValues() {
+  if (_champSel.size >= _champListe.length) _champSel = new Set();
+  else _champSel = new Set(_champListe);
+  renderChampValues(true);
 }
 function applyChampFilter() {
   const f = document.getElementById('champ-field').value;
-  const v = document.getElementById('champ-value').value;
-  if (!f || !v) { showToast('Choisissez une caractéristique et une valeur', 'error'); return; }
-  state.filterChamp = { field: f, value: v };
+  const vals = [..._champSel];
+  if (!f || !vals.length) { showToast('Cochez au moins une valeur', 'error'); return; }
+  state.filterChamp = { field: f, values: vals };
   const def = masseFieldById(f);
   const btn = document.getElementById('map-champ-btn');
-  if (btn) btn.textContent = (def ? def.label : '') + ' : ' + (v === '__vide' ? 'non renseigné' : v);
+  const libelle = vals.length === 1
+    ? (vals[0] === '__vide' ? 'non renseigné' : vals[0])
+    : vals.length + ' valeurs';
+  if (btn) btn.textContent = (def ? def.label : '') + ' : ' + libelle;
   refreshMapMarkers();
   toggleChampPanel();
   const n = state.points.filter(p => p.lat && p.lng && champFilterOK(p)
@@ -2675,6 +2700,7 @@ function applyChampFilter() {
 }
 function clearChampFilter() {
   state.filterChamp = null;
+  _champSel = new Set();
   const btn = document.getElementById('map-champ-btn');
   if (btn) btn.textContent = 'Filtre caractéristique';
   refreshMapMarkers();
@@ -4522,7 +4548,7 @@ function renderSettings() {
       ).join('') + '</div><div class="set-add"><input class="set-input" id="addcfopt-' + i + '" placeholder="Nouvelle option…"><button class="set-btn" onclick="addCustomOption(' + i + ')">Ajouter</button></div>';
     }
     html += `<div class="set-card">
-      <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ « ${escapeHtml(cf.column)} » · ${typeLabel}</span></div>
+      <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ colonne « ${escapeHtml(cf.column)} » · ${typeLabel}</span></div>
       ${optChips}
       <div class="set-add">
         <select class="set-input" style="max-width:190px" onchange="changeCustomFieldType(${i}, this.value)">
@@ -4773,11 +4799,20 @@ function changeCustomFieldType(i, type){
 }
 function renameCustomField(i){
   const cf = CONFIG.customFields[i]; if (!cf) return;
-  const v = (prompt('Nouveau nom affiché du champ :', cf.label) || '').trim();
+  const v = (prompt('Nom affiché dans la fiche :', cf.label) || '').trim();
   if (!v) return;
-  cf.label = v;   // on garde la même colonne Sheet pour ne pas perdre les données déjà saisies
+  cf.label = v;
+  const col = (prompt('Colonne du Google Sheet à lire / écrire :\n(doit correspondre EXACTEMENT à l\u2019en-tête du tableur)', cf.column) || '').trim();
+  if (col && col !== cf.column) {
+    if ((CONFIG.customFields || []).some((c, j) => j !== i && c.column === col)) {
+      showToast('Une autre colonne porte déjà ce nom', 'error'); return;
+    }
+    cf.column = col;
+    showToast('Champ « ' + v + ' » relié à la colonne « ' + col + ' »', 'success');
+  } else {
+    showToast('Champ renommé', 'success');
+  }
   saveConfig(); renderSettings();
-  showToast('Champ renommé', 'success');
 }
 function addCustomOption(i){
   const cf = CONFIG.customFields[i]; if (!cf) return;
