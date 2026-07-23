@@ -1129,7 +1129,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v65</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v66</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -3833,10 +3833,12 @@ async function loadTemplatesFromSheets(silent){
         if (k!==null && String(r[k]).trim() !== '') custom[m.col] = String(r[k]).trim();
       });
       const photoKey = _findHeaderKey(r, ['photo','lien photo','photo url','image','lien image','url photo']);
-      const photoUrl = photoKey!==null ? driveImageUrl(r[photoKey]) : '';
+      const photoRaw = photoKey!==null ? String(r[photoKey] || '').trim() : '';   // lien D'ORIGINE, à reécrire tel quel
+      const photoUrl = photoRaw ? driveImageUrl(photoRaw) : '';
       const prev = (CONFIG.templates || []).find(t => t.name.toLowerCase() === name.toLowerCase());
       out.push({ key:'sheet_'+slugify(name), name, fromSheet:true,
                  color: prev ? prev.color : null,
+                 photoUrl: photoRaw,                      // ← mémorisé : plus d'effacement à la réécriture
                  thumb: photoUrl || (prev ? prev.thumb : null),
                  values, custom });
     });
