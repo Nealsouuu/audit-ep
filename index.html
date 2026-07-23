@@ -1129,7 +1129,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v66</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v67</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -2913,14 +2913,14 @@ function showForm(pt) {
   document.getElementById('form-title').textContent = pt ? 'Modifier point' : 'Nouveau point';
   document.getElementById('form-id-text').textContent = pt ? pt.id : '';
   document.getElementById('f-nbr-supports').value = pt ? (pt.nbrSupports || '') : '';
-  document.getElementById('f-type-support').value = pt ? (pt.typeSupport || '') : '';
-  document.getElementById('f-etat-support').value = pt ? (pt.etatSupport || '') : '';
+  setFieldValueSmart(document.getElementById('f-type-support'),   pt ? (pt.typeSupport || '') : '');
+  setFieldValueSmart(document.getElementById('f-etat-support'),   pt ? (pt.etatSupport || '') : '');
   document.getElementById('f-hauteur').value = pt ? (pt.hauteur || '') : '';
-  document.getElementById('f-type-attache').value = pt ? (pt.typeAttache || '') : '';
+  setFieldValueSmart(document.getElementById('f-type-attache'),   pt ? (pt.typeAttache || '') : '');
   document.getElementById('f-nbr-luminaires').value = pt ? (pt.nbrLuminaires || '') : '';
-  document.getElementById('f-type-luminaire').value = pt ? (pt.typeLuminaire || '') : '';
-  document.getElementById('f-etat-luminaire').value = pt ? (pt.etatLuminaire || '') : '';
-  document.getElementById('f-technologie').value = pt ? (pt.technologie || '') : '';
+  setFieldValueSmart(document.getElementById('f-type-luminaire'), pt ? (pt.typeLuminaire || '') : '');
+  setFieldValueSmart(document.getElementById('f-etat-luminaire'), pt ? (pt.etatLuminaire || '') : '');
+  setFieldValueSmart(document.getElementById('f-technologie'),    pt ? (pt.technologie || '') : '');
   document.getElementById('f-puissance').value = pt ? (pt.puissance || '') : '';
   document.getElementById('f-observations').value = pt ? (pt.observations || '') : '';
   populateIdArmoireSelect(pt ? (pt.idArmoire || '') : '');
@@ -3108,10 +3108,10 @@ function dupliquerPointData(source) {
   document.getElementById('form-title').textContent = 'Dupliquer — GPS requis';
   document.getElementById('form-id-label').textContent = 'Nouveau point';
   document.getElementById('f-nbr-supports').value = source.nbrSupports || '';
-  document.getElementById('f-type-support').value = source.typeSupport || '';
-  document.getElementById('f-etat-support').value = source.etatSupport || '';
+  setFieldValueSmart(document.getElementById('f-type-support'), source.typeSupport || '');
+  setFieldValueSmart(document.getElementById('f-etat-support'), source.etatSupport || '');
   document.getElementById('f-hauteur').value = source.hauteur || '';
-  document.getElementById('f-type-attache').value = source.typeAttache || '';
+  setFieldValueSmart(document.getElementById('f-type-attache'), source.typeAttache || '');
   document.getElementById('f-nbr-luminaires').value = source.nbrLuminaires || '';
   document.getElementById('f-type-luminaire').value = '';
   document.getElementById('f-etat-luminaire').value = '';
