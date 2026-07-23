@@ -1129,7 +1129,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v64</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v65</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -3841,6 +3841,15 @@ async function loadTemplatesFromSheets(silent){
                  values, custom });
     });
     SHEET_TEMPLATES = out;
+    // Filet de sécurité : si les trames arrivent après les points, on complète les fiches
+    // concernées par une « Catégorie » (uniquement leurs champs restés vides).
+    let _recat = 0;
+    (state.points || []).forEach(p => {
+      const avant = JSON.stringify([p.typeSupport, p.hauteur, p.typeLuminaire, p.technologie, p.etatSupport]);
+      applyCategorieToPoint(p);
+      if (JSON.stringify([p.typeSupport, p.hauteur, p.typeLuminaire, p.technologie, p.etatSupport]) !== avant) _recat++;
+    });
+    if (_recat) { saveLocal(); refreshMapMarkers(); }
     renderTemplatesBar();
     if (typeof renderMasseTplBar === 'function') renderMasseTplBar();
     if (currentScreen === 'settings') renderSettings();
@@ -5123,6 +5132,9 @@ async function loadFromSheets(silent) {
     if (!navigator.onLine) return;
     try {
       if (!silent) showToast('Synchronisation serveur…');
+      // Les trames doivent être connues AVANT de lire les points : la colonne « Catégorie »
+      // du Sheet a besoin de la trame correspondante pour compléter la fiche.
+      if (!SHEET_TEMPLATES.length) { try { await loadTemplatesFromSheets(true); } catch (e) {} }
       const url = SCRIPT_URL + '?sheet=Points%20Lumineux&chantier=' + encodeURIComponent(state.chantier);
       const res = await fetch(url);
       const data = await res.json();
