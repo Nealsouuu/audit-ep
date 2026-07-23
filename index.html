@@ -691,6 +691,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .set-tpl-row:first-child{border-top:none}
 .set-tpl-thumb{width:52px;height:40px;border-radius:6px;object-fit:cover;background:var(--bg1,#0f172a);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:18px}
 .set-sec-head{cursor:pointer;user-select:none;padding:10px 4px;margin:4px 0}
+.ord-item{display:flex;align-items:center;gap:8px;cursor:grab;background:var(--bg2,#1e293b);border-radius:8px;margin-bottom:4px;padding:6px 8px}
+.ord-item.ord-drag{opacity:.5;border:1px dashed var(--accent)}
+.ord-grip{color:#64748b;font-size:16px;cursor:grab;touch-action:none;padding:0 2px}
+#map-champ-panel{position:absolute;top:calc(env(safe-area-inset-top) + 108px);right:10px;z-index:1000;width:min(300px,86vw);background:rgba(15,23,42,.97);backdrop-filter:blur(8px);border:1px solid var(--border2);border-radius:12px;padding:10px;display:none}
+#map-champ-panel.show{display:block}
 .set-caret{display:inline-block;width:16px;color:var(--accent)}
 .multi-chips{display:flex;flex-wrap:wrap;gap:7px;padding:4px 0}
 .mchip{padding:7px 12px;border:1px solid var(--border2,#334155);border-radius:999px;font-size:13px;color:var(--text);background:var(--bg1,#0f172a);cursor:pointer}
@@ -859,6 +864,20 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   </div>
   <div id="map"></div>
   <button class="map-filter" id="map-filter-btn" onclick="toggleFilterPanel()">Toutes les armoires</button>
+  <button class="map-filter" id="map-champ-btn" onclick="toggleChampPanel()" style="left:auto;right:10px">Filtre caractéristique</button>
+  <div id="map-champ-panel">
+    <div class="mfp-head">
+      <button class="mfp-btn" onclick="clearChampFilter()">Effacer</button>
+      <button class="mfp-btn" onclick="toggleChampPanel()">Fermer ✕</button>
+    </div>
+    <div style="padding:6px 2px">
+      <div class="form-label">Caractéristique</div>
+      <select class="set-input" id="champ-field" onchange="renderChampValues()" style="margin-bottom:8px"></select>
+      <div class="form-label">Valeur</div>
+      <select class="set-input" id="champ-value" style="margin-bottom:8px"></select>
+      <button class="set-btn" style="width:100%" onclick="applyChampFilter()">Appliquer le filtre</button>
+    </div>
+  </div>
   <div id="map-filter-panel">
     <div class="mfp-head">
       <button class="mfp-btn" id="mfp-all-btn" onclick="toggleAllArmoiresFilter()">Tout sélectionner</button>
@@ -1129,7 +1148,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <div class="screen" id="screen-settings">
   <div class="settings-head">
     <div class="settings-title">Réglages</div>
-    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v67</b></div>
+    <div class="settings-sub">Personnalise tes listes et tes champs. Les modifications s'appliquent tout de suite. · <b>v69</b></div>
   </div>
   <div class="settings-body" id="settings-body"></div>
 </div>
@@ -1746,6 +1765,7 @@ let state = {
   points: [],
   armoires: [],
   filterArmoire: [],   // multi-sélection d'armoires (vide = toutes)
+  filterChamp: null,   // { field, value } — filtre par caractéristique (null = aucun)
   currentPoint: null,
   previousScreen: 'map',
   panierInForm: false,
@@ -2530,10 +2550,13 @@ function cancelCalibration() {
 
 // Un point est "solaire" si son champ perso Solaire est renseigné (hors 'infaisable'),
 // ou si sa technologie/type de luminaire mentionne le solaire.
+// Étoile UNIQUEMENT si le champ « Solaire » vaut explicitement oui.
+// « non », vide, ou toute autre valeur → point rond normal.
 function isSolarPoint(pt){
-  const sol = (pt.custom && (pt.custom['Solaire'] || pt.custom['solaire'])) || '';
-  if (sol && !/infaisable/i.test(sol)) return true;
-  return /solaire/i.test(String(pt.technologie||'')) || /solaire/i.test(String(pt.typeLuminaire||''));
+  const sol = String((pt.custom && (pt.custom['Solaire'] || pt.custom['solaire'])) || '').trim();
+  if (!sol) return false;
+  const v = _normVal(sol);
+  return v === 'oui' || v === 'yes' || v === 'true' || v === 'o' || v === 'x';
 }
 // Rond par défaut ; étoile pour les points solaires.
 function markerShapeHTML(pt, color){
@@ -2595,6 +2618,68 @@ function renderFilterPanel() {
       <span>${escapeHtml(id)}</span><span class="mfp-check">${sel.has(id) ? '✓' : ''}</span>
     </div>`).join('') || '<div class="set-empty" style="padding:8px">' + (q ? 'Aucune armoire « ' + escapeHtml(q) + ' »' : 'Aucune armoire') + '</div>';
 }
+/* ═══ FILTRE PAR CARACTÉRISTIQUE (champ + valeur) ═══ */
+function champFilterOK(pt) {
+  const f = state.filterChamp;
+  if (!f || !f.field) return true;
+  const def = masseFieldById(f.field);
+  if (!def) return true;
+  const v = def.custom ? ((pt.custom && pt.custom[def.custom]) || '') : (pt[def.key] || '');
+  if (f.value === '__vide') return String(v).trim() === '';
+  return _normVal(v) === _normVal(f.value);
+}
+function toggleChampPanel() {
+  const p = document.getElementById('map-champ-panel');
+  p.classList.toggle('show');
+  if (p.classList.contains('show')) renderChampFields();
+}
+function renderChampFields() {
+  const sel = document.getElementById('champ-field');
+  if (!sel) return;
+  const cur = state.filterChamp ? state.filterChamp.field : '';
+  sel.innerHTML = masseFieldDefs()
+    .map(d => `<option value="${escapeHtml(d.id)}"${d.id === cur ? ' selected' : ''}>${escapeHtml(d.label)}</option>`).join('');
+  renderChampValues();
+}
+function renderChampValues() {
+  const fSel = document.getElementById('champ-field');
+  const vSel = document.getElementById('champ-value');
+  if (!fSel || !vSel) return;
+  const def = masseFieldById(fSel.value);
+  // valeurs réellement présentes sur le chantier + options de la liste
+  const vues = new Set();
+  state.points.forEach(p => {
+    if (state.chantier && String(p.chantier || '') !== String(state.chantier)) return;
+    const v = def && def.custom ? ((p.custom && p.custom[def.custom]) || '') : (def ? (p[def.key] || '') : '');
+    if (String(v).trim() !== '') vues.add(String(v).trim());
+  });
+  (def && def.options ? def.options : []).forEach(o => vues.add(o));
+  const cur = state.filterChamp ? state.filterChamp.value : '';
+  const liste = [...vues].sort((a, b) => a.localeCompare(b, 'fr'));
+  vSel.innerHTML = liste.map(v => `<option${v === cur ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('')
+    + `<option value="__vide"${cur === '__vide' ? ' selected' : ''}>— (non renseigné) —</option>`;
+}
+function applyChampFilter() {
+  const f = document.getElementById('champ-field').value;
+  const v = document.getElementById('champ-value').value;
+  if (!f || !v) { showToast('Choisissez une caractéristique et une valeur', 'error'); return; }
+  state.filterChamp = { field: f, value: v };
+  const def = masseFieldById(f);
+  const btn = document.getElementById('map-champ-btn');
+  if (btn) btn.textContent = (def ? def.label : '') + ' : ' + (v === '__vide' ? 'non renseigné' : v);
+  refreshMapMarkers();
+  toggleChampPanel();
+  const n = state.points.filter(p => p.lat && p.lng && champFilterOK(p)
+    && (!state.chantier || String(p.chantier || '') === String(state.chantier))).length;
+  showToast(n + ' point(s) correspondent', 'success');
+}
+function clearChampFilter() {
+  state.filterChamp = null;
+  const btn = document.getElementById('map-champ-btn');
+  if (btn) btn.textContent = 'Filtre caractéristique';
+  refreshMapMarkers();
+  toggleChampPanel();
+}
 function toggleFilterPanel() {
   document.getElementById('map-filter-panel').classList.toggle('show');
   renderFilterPanel();
@@ -2646,6 +2731,7 @@ function refreshMapMarkers() {
     if (!pt.lat || !pt.lng) return;
     if (state.chantier && String(pt.chantier || '') !== String(state.chantier)) return;
     if (state.filterArmoire.length && !state.filterArmoire.includes(String(pt.idArmoire))) return;
+    if (!champFilterOK(pt)) return;
     const color = getMarkerColor(pt);
     const icon = L.divIcon({ className: '', html: markerShapeHTML(pt, color), iconSize: [18,18], iconAnchor: [9,9] });
     const marker = L.marker([pt.lat, pt.lng], { icon });
@@ -2927,6 +3013,7 @@ function showForm(pt) {
   document.getElementById('toggle-depose').classList.toggle('on', !!(pt && pt.aDeposer));
   document.getElementById('f-classe-precision').value = pt ? (pt.classePrecision || 'C') : 'C';
   renderCustomFields();
+  applyFieldOrder();          // les champs perso viennent d'être recréés → on replace tout
   (CONFIG.customFields || []).forEach(cf => {
     const el = document.getElementById('cf-' + cf.key);
     if (el) setFieldEl(el, (pt && pt.custom && pt.custom[cf.column] != null) ? pt.custom[cf.column] : '');
@@ -3710,6 +3797,20 @@ const ARM_ORDER_DEFS = [
   { key:'observations', label:'Observations',         el:'af-observations' },
   { key:'custom',       label:'Champs personnalisés', el:'custom-fields-arm', self:true },
 ];
+// Défs complètes = champs standard (dont ceux qui manquaient) + un item par champ personnalisé
+function plOrderDefs() {
+  const base = PL_ORDER_DEFS.filter(d => d.key !== 'custom').slice();
+  base.push({ key:'depose', label:'Point à déposer', el:'toggle-depose' });
+  (CONFIG.customFields || []).forEach(cf =>
+    base.push({ key:'cf:' + cf.key, label:cf.label + ' (perso)', el:'cf-' + cf.key }));
+  return base;
+}
+function armOrderDefs() {
+  const base = ARM_ORDER_DEFS.filter(d => d.key !== 'custom').slice();
+  (CONFIG.armCustomFields || []).forEach(cf =>
+    base.push({ key:'acf:' + cf.key, label:cf.label + ' (perso)', el:'acf-' + cf.key }));
+  return base;
+}
 function effectiveOrder(defs, saved) {
   const keys = (saved || []).filter(k => defs.some(d => d.key === k));
   defs.forEach(d => { if (!keys.includes(d.key)) keys.push(d.key); }); // nouveaux champs → à la fin
@@ -3741,11 +3842,91 @@ function reorderForm(formSel, defs, saved) {
   parent.removeChild(marker);
 }
 function applyFieldOrder() {
-  reorderForm('#screen-form', PL_ORDER_DEFS, CONFIG.orderPL);
-  reorderForm('#screen-armoire-form', ARM_ORDER_DEFS, CONFIG.orderARM);
+  reorderForm('#screen-form', plOrderDefs(), CONFIG.orderPL);
+  reorderForm('#screen-armoire-form', armOrderDefs(), CONFIG.orderARM);
+  nettoyerTitresSections('#screen-form');
+  nettoyerTitresSections('#screen-armoire-form');
+}
+
+// Après réorganisation, un titre de section peut se retrouver sans aucun champ
+// en dessous (les champs ont été déplacés ailleurs) : on le masque.
+function nettoyerTitresSections(formSel) {
+  const form = document.querySelector(formSel + ' .form-scroll') || document.querySelector(formSel);
+  if (!form) return;
+  const enfants = [...form.children];
+  enfants.forEach((el, i) => {
+    if (!el.classList || !el.classList.contains('form-section-title')) return;
+    let aDuContenu = false;
+    for (let j = i + 1; j < enfants.length; j++) {
+      const e = enfants[j];
+      if (e.classList && e.classList.contains('form-section-title')) break;   // section suivante
+      // un bloc non vide et visible = la section a du contenu
+      if (e.offsetParent !== null || (e.children && e.children.length)) { aDuContenu = true; break; }
+    }
+    el.style.display = aDuContenu ? '' : 'none';
+  });
+}
+// Réordonne par glisser-déposer (fonctionne à la souris et au doigt)
+function initOrderDrag() {
+  document.querySelectorAll('.ord-list').forEach(list => {
+    if (list._dragReady) return;
+    list._dragReady = true;
+    let src = null;
+    list.addEventListener('dragstart', e => {
+      const it = e.target.closest('.ord-item'); if (!it) return;
+      src = it; it.classList.add('ord-drag');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', it.dataset.idx); } catch (err) {}
+    });
+    list.addEventListener('dragover', e => {
+      e.preventDefault();
+      const it = e.target.closest('.ord-item');
+      if (!it || it === src) return;
+      const r = it.getBoundingClientRect();
+      list.insertBefore(src, (e.clientY - r.top) < r.height / 2 ? it : it.nextSibling);
+    });
+    list.addEventListener('dragend', () => {
+      if (src) src.classList.remove('ord-drag');
+      src = null;
+      appliquerOrdreDepuisListe(list);
+    });
+    // tactile
+    let tSrc = null;
+    list.addEventListener('touchstart', e => {
+      const it = e.target.closest('.ord-grip') ? e.target.closest('.ord-item') : null;
+      if (it) { tSrc = it; it.classList.add('ord-drag'); }
+    }, { passive: true });
+    list.addEventListener('touchmove', e => {
+      if (!tSrc) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      const it = el && el.closest ? el.closest('.ord-item') : null;
+      if (it && it !== tSrc && it.parentNode === list) {
+        const r = it.getBoundingClientRect();
+        list.insertBefore(tSrc, (t.clientY - r.top) < r.height / 2 ? it : it.nextSibling);
+      }
+    }, { passive: false });
+    list.addEventListener('touchend', () => {
+      if (!tSrc) return;
+      tSrc.classList.remove('ord-drag'); tSrc = null;
+      appliquerOrdreDepuisListe(list);
+    });
+  });
+}
+function appliquerOrdreDepuisListe(list) {
+  const which = list.dataset.which;
+  const defs = which === 'PL' ? plOrderDefs() : armOrderDefs();
+  const prop = which === 'PL' ? 'orderPL' : 'orderARM';
+  const ancien = effectiveOrder(defs, CONFIG[prop]);
+  const nouveau = [...list.querySelectorAll('.ord-item')].map(it => ancien[Number(it.dataset.idx)]);
+  if (nouveau.length !== ancien.length || nouveau.some(k => !k)) return;
+  CONFIG[prop] = nouveau;
+  saveConfig();
+  renderSettings();
 }
 function moveField(which, idx, dir) {
-  const defs = which === 'PL' ? PL_ORDER_DEFS : ARM_ORDER_DEFS;
+  const defs = which === 'PL' ? plOrderDefs() : armOrderDefs();
   const prop = which === 'PL' ? 'orderPL' : 'orderARM';
   const keys = effectiveOrder(defs, CONFIG[prop]);
   const j = idx + dir;
@@ -4344,6 +4525,11 @@ function renderSettings() {
       <div class="set-card-title">${escapeHtml(cf.label)} <span class="set-tag">→ « ${escapeHtml(cf.column)} » · ${typeLabel}</span></div>
       ${optChips}
       <div class="set-add">
+        <select class="set-input" style="max-width:190px" onchange="changeCustomFieldType(${i}, this.value)">
+          <option value="text"${cf.type === 'text' ? ' selected' : ''}>Texte libre</option>
+          <option value="select"${cf.type === 'select' ? ' selected' : ''}>Liste de choix</option>
+          <option value="multi"${cf.type === 'multi' ? ' selected' : ''}>Choix multiples</option>
+        </select>
         <button class="set-btn" onclick="renameCustomField(${i})">✏️ Renommer</button>
         <button class="set-btn set-btn-del" onclick="removeCustomField(${i})">Supprimer</button>
       </div>
@@ -4443,25 +4629,36 @@ function renderSettings() {
   </div>`;
 
   html += '<div class="set-section-title">Ordre des champs dans les fiches</div>';
-  [['PL', 'Fiche point lumineux', PL_ORDER_DEFS, CONFIG.orderPL], ['ARM', 'Fiche armoire', ARM_ORDER_DEFS, CONFIG.orderARM]].forEach(([which, title, defs, saved]) => {
+  [['PL', 'Fiche point lumineux', plOrderDefs(), CONFIG.orderPL], ['ARM', 'Fiche armoire', armOrderDefs(), CONFIG.orderARM]].forEach(([which, title, defs, saved]) => {
     const keys = effectiveOrder(defs, saved);
-    html += `<div class="set-card"><div class="set-card-title">${title}</div>`;
+    html += `<div class="set-card"><div class="set-card-title">${title}</div>
+      <div class="set-empty" style="margin-bottom:6px">Glissez un champ pour le déplacer (les flèches restent disponibles).</div>
+      <div class="ord-list" data-which="${which}">`;
     keys.forEach((k, i) => {
       const d = defs.find(x => x.key === k);
-      html += `<div class="set-order-row"><span class="set-color-label">${escapeHtml(d.label)}</span><span>
+      html += `<div class="set-order-row ord-item" draggable="true" data-which="${which}" data-idx="${i}">
+        <span class="ord-grip">⠿</span>
+        <span class="set-color-label" style="flex:1">${escapeHtml(d.label)}</span><span>
         <button class="set-mini" onclick="moveField('${which}',${i},-1)" ${i === 0 ? 'disabled' : ''}>▲</button>
         <button class="set-mini" onclick="moveField('${which}',${i},1)" ${i === keys.length - 1 ? 'disabled' : ''}>▼</button>
       </span></div>`;
     });
-    html += '</div>';
+    html += '</div></div>';
   });
 
   html += '<div class="set-section-title">Couleurs des points sur la carte</div>';
   html += '<div class="set-card">';
   // Champs disponibles pour déclencher la couleur : toutes les listes + champs perso de type liste
   const colorChoices = LIST_FIELDS.slice();
+  // + toutes les autres listes de choix définies dans les réglages
+  Object.keys(CONFIG.lists || {}).forEach(k => {
+    if (!colorChoices.some(f => f.key === k) && (CONFIG.lists[k] || []).length)
+      colorChoices.push({ key: k, label: k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()) });
+  });
+  // + tous les champs personnalisés (liste ou choix multiples)
   (CONFIG.customFields || []).forEach(cf => {
-    if (cf.type === 'select' || cf.type === 'multi') colorChoices.push({ key: 'custom:' + cf.column, label: cf.label, custom: true, column: cf.column });
+    if (cf.type === 'select' || cf.type === 'multi')
+      colorChoices.push({ key: 'custom:' + cf.column, label: cf.label, custom: true, column: cf.column });
   });
   window._colorChoices = colorChoices;
   html += '<div class="set-color-row"><span class="set-color-label">Couleur déclenchée par</span>' +
@@ -4549,6 +4746,7 @@ function renderSettings() {
     </div>`;
   });
   box.innerHTML = out;
+  setTimeout(initOrderDrag, 30);
 }
 function addOption(key) {
   const inp = document.getElementById('addopt-' + key);
@@ -4565,6 +4763,13 @@ function removeOption(key, idx) {
 function slugify(s) {
   return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || ('champ_' + Date.now());
+}
+function changeCustomFieldType(i, type){
+  const cf = CONFIG.customFields[i]; if (!cf) return;
+  cf.type = type;
+  if ((type === 'select' || type === 'multi') && !Array.isArray(cf.options)) cf.options = [];
+  saveConfig(); renderSettings();
+  showToast('Type modifié — ajoutez les options si besoin', 'success');
 }
 function renameCustomField(i){
   const cf = CONFIG.customFields[i]; if (!cf) return;
@@ -4655,26 +4860,40 @@ function setColorField(field) {
   renderSettings();
 }
 
-let masseOptions = {
-  'f-type-support': ['Mât droit','Console','Potence','Candélabre','Encastré sol','Façade'],
-  'f-type-attache': ['Bride','Crosse','Platine','Direct'],
-  'f-etat-support': ['Bon','Moyen','Mauvais','À remplacer'],
-  'f-etat-luminaire': ['Bon','Moyen','Mauvais','À remplacer'],
-  'f-technologie': ['LED','Sodium HP','Sodium BP','Iodures métalliques','Fluo compact'],
-  'f-type-luminaire': ['Lanterne','Projecteur','Hublot','Borne','Applique','Globe'],
-  'f-classe-precision': ['C','B','A'],
-};
-const masseTextFields = ['f-id-armoire'];
-const masseKeys = {
-  'f-type-support': 'typeSupport',
-  'f-type-attache': 'typeAttache',
-  'f-etat-support': 'etatSupport',
-  'f-etat-luminaire': 'etatLuminaire',
-  'f-technologie': 'technologie',
-  'f-type-luminaire': 'typeLuminaire',
-  'f-classe-precision': 'classePrecision',
-  'f-id-armoire': 'idArmoire',
-};
+/* Champs proposés dans « Une seule caractéristique » — construits dynamiquement
+   à partir des listes réelles + des champs personnalisés (donc toujours à jour). */
+function masseFieldDefs() {
+  const L = CONFIG.lists || {};
+  const defs = [
+    { id:'f-type-support',     label:'Type de support',     key:'typeSupport',    options:L.typeSupport },
+    { id:'f-etat-support',     label:'État du support',     key:'etatSupport',    options:L.etatSupport },
+    { id:'f-hauteur',          label:'Hauteur',             key:'hauteur',        options:L.hauteur },
+    { id:'f-type-attache',     label:"Type d'attache",      key:'typeAttache',    options:L.typeAttache },
+    { id:'f-type-luminaire',   label:'Type de luminaire',   key:'typeLuminaire',  options:L.typeLuminaire },
+    { id:'f-etat-luminaire',   label:'État luminaires',     key:'etatLuminaire',  options:L.etatLuminaire },
+    { id:'f-technologie',      label:'Technologie',         key:'technologie',    options:L.technologie },
+    { id:'f-nbr-supports',     label:'Nbr supports',        key:'nbrSupports',    options:null },
+    { id:'f-nbr-luminaires',   label:'Nbr luminaires',      key:'nbrLuminaires',  options:null },
+    { id:'f-puissance',        label:'Puissance',           key:'puissance',      options:null },
+    { id:'f-id-armoire',       label:'ID Armoire',          key:'idArmoire',      options:null },
+    { id:'f-classe-precision', label:'Classe de précision', key:'classePrecision',options:['C','B','A'] },
+    { id:'f-observations',     label:'Observations',        key:'observations',   options:null },
+  ];
+  (CONFIG.customFields || []).forEach(cf => {
+    defs.push({ id:'cf:' + cf.column, label:cf.label, custom:cf.column,
+                options:(cf.type === 'select' || cf.type === 'multi') ? cf.options : null });
+  });
+  return defs;
+}
+function masseFieldById(id) { return masseFieldDefs().find(d => d.id === id); }
+// Remplit la liste déroulante du modal (appelé à chaque ouverture)
+function renderMasseFieldSelect() {
+  const sel = document.getElementById('masse-field');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">-- Sélectionner --</option>' +
+    '<option value="__trame">🗂 Trame prédéfinie (toutes les caractéristiques)</option>' +
+    masseFieldDefs().map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.label)}</option>`).join('');
+}
 
 document.getElementById('masse-field').addEventListener('change', function() {
   const f = this.value;
@@ -4688,10 +4907,11 @@ document.getElementById('masse-field').addEventListener('change', function() {
     if (tplBar) { renderMasseTplBar(); tplBar.style.display = 'flex'; }
     return;
   }
-  if (masseOptions[f]) {
-    sel.innerHTML = masseOptions[f].map(o => `<option>${o}</option>`).join('');
+  const def = masseFieldById(f);
+  if (def && def.options && def.options.length) {
+    sel.innerHTML = def.options.map(o => `<option>${escapeHtml(o)}</option>`).join('');
     selRow.style.display = 'block'; txtRow.style.display = 'none';
-  } else if (masseTextFields.includes(f)) {
+  } else if (def) {
     selRow.style.display = 'none'; txtRow.style.display = 'block';
   } else {
     selRow.style.display = 'none'; txtRow.style.display = 'none';
@@ -4785,6 +5005,7 @@ function openModalMasse() {
   const pts = state.points.filter(p => p.dansPanier);
   if (!pts.length) { showToast('Aucun point sélectionné', 'error'); return; }
   document.getElementById('masse-count').textContent = pts.length;
+  renderMasseFieldSelect();
   document.getElementById('masse-field').value = '';
   document.getElementById('masse-value-row').style.display = 'none';
   document.getElementById('masse-text-row').style.display = 'none';
@@ -4799,15 +5020,18 @@ function closeModalMasse(e) {
 async function applyMasse() {
   const field = document.getElementById('masse-field').value;
   if (field === '__trame') { showToast('Touchez une trame dans le bandeau pour l\u2019appliquer', 'error'); return; }
-  const key = masseKeys[field];
-  if (!field || !key) { showToast('Sélectionnez un champ', 'error'); return; }
-  const value = masseTextFields.includes(field)
-    ? document.getElementById('masse-text').value.trim()
-    : document.getElementById('masse-value').value;
+  const def = masseFieldById(field);
+  if (!field || !def) { showToast('Sélectionnez un champ', 'error'); return; }
+  const value = (def.options && def.options.length)
+    ? document.getElementById('masse-value').value
+    : document.getElementById('masse-text').value.trim();
   const targets = state.points.filter(p => p.dansPanier);
   if (!targets.length) { showToast('Aucun point sélectionné', 'error'); return; }
   const entries = targets.map(p => ({ id: p.id, before: cloneEntry(p) }));
-  targets.forEach(p => { p[key] = value; });
+  targets.forEach(p => {
+    if (def.custom) { p.custom = p.custom || {}; p.custom[def.custom] = value; }
+    else p[def.key] = value;
+  });
   pushUndo('Modif. masse (' + targets.length + ' pts)', entries);
   saveLocal(); closeModalMasse(); renderPanier(); refreshMapMarkers();
   showToast(targets.length + ' point' + (targets.length > 1 ? 's' : '') + ' modifié' + (targets.length > 1 ? 's' : '') + ' — sync…', 'success');
@@ -4890,7 +5114,7 @@ function colVal(r, name) {
 // ── LIRE les armoires depuis le Sheet (redescente serveur → app) ──
 function mapServerArmoire(r) {
   const custom = {};
-  (CONFIG.armCustomFields || []).forEach(cf => { if (r[cf.column] !== undefined) custom[cf.column] = r[cf.column]; });
+  (CONFIG.armCustomFields || []).forEach(cf => { const v = colVal(r, cf.column); if (v !== undefined) custom[cf.column] = v; });
   const photos = {};
   const ph = String(r['Photos'] || '');
   ARM_PHOTO_TYPES.forEach(t => { photos[t] = ph.indexOf(t) >= 0; });
@@ -5047,7 +5271,8 @@ async function syncConfigWithSheets(silent) {
 function mapServerRow(r) {
   const custom = {};
   (CONFIG.customFields || []).forEach(cf => {
-    if (r[cf.column] !== undefined) custom[cf.column] = r[cf.column];
+    const v = colVal(r, cf.column);
+    if (v !== undefined) custom[cf.column] = v;
   });
   return {
     id: String(r['ID'] || ''),
